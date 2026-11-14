@@ -17,3 +17,9 @@ out/
 /src-tauri/gen/android/app/src/main/jniLibs/
 /src-tauri/gen/android/local.properties
 /src-tauri/gen/apple
+
+# Tauri writes its Gradle plugin into buildSrc at the identifier's path on every
+# Android build, and never overwrites a copy that already exists. A committed
+# copy therefore goes stale with each tauri-cli update (and doubled up when the
+# identifier changed), so it is left to be generated fresh.
+/src-tauri/gen/android/buildSrc/src/main/java/
