@@ -178,7 +178,7 @@ export function SettingsView({
                 <span className="mt-0.5 block text-muted-foreground">
                   {settings.split_spreads
                     ? "Each spread becomes two pages, right half first for manga. Kindle zooms into part of a wide page instead of fitting it, so this is almost always what you want."
-                    : "Spreads stay whole. Fine on a tablet or a desktop reader; on a Kindle you will see half the drawing."}
+                    : "Spreads stay whole. On a Kindle the spread is shown whole, smaller, with white bars above and below — pinch to zoom in."}
                 </span>
               </span>
             </label>

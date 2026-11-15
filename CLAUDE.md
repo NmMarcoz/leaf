@@ -286,8 +286,14 @@ there while looking fine in desktop EPUB readers.
   default of 75 visibly mushes screentones and inked edges, and now that
   splitting is the default path every spread goes through it.
 - The uniform-canvas rule in `epub.rs` still stands and is still tested: no page
-  may declare a viewport wider than `original-resolution`. It is what keeps a
-  deliberately-unsplit spread fitted rather than cut.
+  may declare a viewport wider than `original-resolution`.
+- **A kept-whole spread is letterboxed in the pixels** (`letterbox` in
+  `epub.rs`), not by CSS. Kindle's converter lays an `<img>` out at its
+  declared `width`/`height` and ignores `max-width`/`object-fit`, so a CSS-fitted
+  spread still came out cropped to its left part on a 2024 Paperwhite. The page
+  is padded white to the canvas's aspect ratio at the spread's full width (so
+  pinch-zoom keeps detail), and every `<img>` is declared at its fitted size
+  (`fit_within`). EPUB only — CBZ readers handle wide pages themselves.
 
 ## Settings and build output
 
