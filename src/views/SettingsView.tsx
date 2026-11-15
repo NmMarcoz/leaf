@@ -193,7 +193,7 @@ export function SettingsView({
                 <span className="font-medium">Volume number on the cover</span>
                 <span className="mt-0.5 block text-muted-foreground">
                   {settings.cover_badge
-                    ? "The cover in your Kindle's library gets the volume number in a corner, so a long series can be told apart at a glance. The book itself still opens on the untouched cover. EPUB only."
+                    ? "The cover in your Kindle's library gets the volume number on a bookmark ribbon at the left edge, clear of Kindle's own progress marker, so a long series can be told apart at a glance. The book itself still opens on the untouched cover. EPUB only."
                     : "The cover is shown exactly as published."}
                 </span>
               </span>
