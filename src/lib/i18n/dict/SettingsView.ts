@@ -20,7 +20,7 @@ const dict: PartialDictionary = {
     "settingsView.splitSpreadsOn":
       "Each spread becomes two pages, right half first for manga. Kindle zooms into part of a wide page instead of fitting it, so this is almost always what you want.",
     "settingsView.splitSpreadsOff":
-      "Spreads stay whole. Fine on a tablet or a desktop reader; on a Kindle you will see half the drawing.",
+      "Spreads stay whole. On a Kindle the spread is shown whole, smaller, with white bars above and below — pinch to zoom in.",
     "settingsView.coverBadge": "Volume number on the cover",
     "settingsView.coverBadgeOn":
       "The cover in your Kindle's library gets the volume number in a corner, so a long series can be told apart at a glance. The book itself still opens on the untouched cover. EPUB only.",
@@ -75,7 +75,7 @@ const dict: PartialDictionary = {
     "settingsView.splitSpreadsOn":
       "Cada página dupla vira duas páginas, com a metade direita primeiro para mangá. O Kindle amplia parte de uma página larga em vez de ajustá-la, então isso é quase sempre o que você quer.",
     "settingsView.splitSpreadsOff":
-      "As páginas duplas ficam inteiras. Bom para um tablet ou um leitor de desktop; no Kindle você verá metade do desenho.",
+      "As páginas duplas ficam inteiras. No Kindle a página dupla aparece inteira, menor, com faixas brancas em cima e embaixo — use o gesto de pinça para ampliar.",
     "settingsView.coverBadge": "Número do volume na capa",
     "settingsView.coverBadgeOn":
       "A capa na biblioteca do Kindle ganha o número do volume em um canto, para distinguir os volumes de uma série longa num relance. O livro em si continua abrindo na capa original. Só EPUB.",

@@ -202,10 +202,26 @@ fn keeping_a_spread_whole_still_fits_it_on_the_canvas() {
         spread_page.contains(r#"content="width=800, height=1168""#),
         "the spread must share the book canvas"
     );
+    // Declared at the size it is shown, not its pixel size: Kindle's converter
+    // lays an <img> out at its attributes and crops what overflows the canvas.
     assert!(
-        spread_page.contains(r#"width="1600" height="1168""#),
-        "the spread image must stay full resolution"
+        spread_page.contains(r#"width="800" height="1168""#),
+        "the spread must be declared fitted to the canvas, got:\n{spread_page}"
     );
+
+    // The letterbox is in the pixels, so the image is the canvas's shape, and
+    // it keeps the spread's full width so zooming still finds the detail.
+    let bytes = {
+        use std::io::Read;
+        let mut b = Vec::new();
+        zip.by_name("OEBPS/images/p0003.jpg").unwrap().read_to_end(&mut b).unwrap();
+        b
+    };
+    let img = image::load_from_memory(&bytes).unwrap();
+    assert_eq!(img.width(), 1600, "the spread must stay full resolution");
+    assert_eq!(img.height(), 2336, "padded to the canvas's aspect ratio");
+    let top = img.to_luma8().get_pixel(800, 10).0[0];
+    assert!(top > 240, "the bars must be white, got {top}");
 
     let opf = read_entry(&mut zip, "OEBPS/content.opf");
     assert!(!opf.contains("rendition:page-spread-center"));

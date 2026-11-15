@@ -69,9 +69,19 @@ pub fn write_with_progress(
     options: &WriteOptions,
     progress: &mut Progress,
 ) -> Result<()> {
-    let Layout { slots, chapters } = build_slots(volume, &options.compression, progress)?;
+    let Layout { mut slots, chapters } = build_slots(volume, &options.compression, progress)?;
     if slots.is_empty() {
         bail!("volume has no pages to write");
+    }
+
+    // One canvas for the whole book. Everything downstream — every page's
+    // viewport and the `original-resolution` Kindle reads — is this one number,
+    // so they cannot disagree and cause a crop.
+    let canvas = canvas_size(&slots);
+
+    for slot in slots.iter_mut().filter(|s| s.spread) {
+        letterbox(slot, canvas, &options.compression)
+            .with_context(|| format!("fitting spread {} to the page", slot.stem))?;
     }
 
     let badged = if options.cover_badge {
@@ -82,11 +92,6 @@ pub fn write_with_progress(
     } else {
         None
     };
-
-    // One canvas for the whole book. Everything downstream — every page's
-    // viewport and the `original-resolution` Kindle reads — is this one number,
-    // so they cannot disagree and cause a crop.
-    let canvas = canvas_size(&slots);
 
     ensure_parent(out)?;
     let file = File::create(out).with_context(|| format!("creating {}", out.display()))?;
@@ -343,6 +348,60 @@ fn content_opf(volume: &Volume, slots: &[Slot], canvas: (u32, u32), badged: bool
     )
 }
 
+/// Bake a kept-whole spread into a page of the book's own shape.
+///
+/// Fitting it with CSS does not survive Send to Kindle: the converter lays the
+/// image out at its declared pixel size, finds it wider than
+/// `original-resolution`, picks a region and zooms into it — half a drawing,
+/// with no sign there is more. So the white bars go into the pixels instead,
+/// which is what KCC does. To the converter it is then an ordinary page with
+/// the canvas's aspect ratio, and there is nothing left for it to crop.
+///
+/// The spread keeps its full width rather than being shrunk to the canvas, so
+/// pinch-zooming on the device still finds the original detail in it.
+fn letterbox(slot: &mut Slot, canvas: (u32, u32), compression: &Compression) -> Result<()> {
+    let (cw, ch) = canvas;
+    if cw == 0 || ch == 0 {
+        return Ok(());
+    }
+    let spread = image::load_from_memory(&slot.bytes).context("decoding spread")?;
+    let (sw, sh) = (spread.width(), spread.height());
+
+    // Wider than the canvas (every real spread): bars above and below. A
+    // "spread" that is somehow taller gets them at the sides instead.
+    let (pw, ph) = if sw as u64 * ch as u64 >= sh as u64 * cw as u64 {
+        (sw, ((sw as u64 * ch as u64).div_ceil(cw as u64)) as u32)
+    } else {
+        (((sh as u64 * cw as u64).div_ceil(ch as u64)) as u32, sh)
+    };
+
+    let mut page = image::RgbImage::from_pixel(pw, ph, image::Rgb([255, 255, 255]));
+    image::imageops::overlay(
+        &mut page,
+        &spread.to_rgb8(),
+        ((pw - sw) / 2) as i64,
+        ((ph - sh) / 2) as i64,
+    );
+
+    let settings = if compression.is_noop() {
+        Compression {
+            max_edge: None,
+            quality: super::SPLIT_QUALITY,
+            grayscale: false,
+        }
+    } else {
+        *compression
+    };
+    let encoded = crate::compress::render(&image::DynamicImage::ImageRgb8(page), &settings)
+        .context("encoding letterboxed spread")?;
+
+    slot.bytes = encoded.bytes;
+    slot.ext = "jpg";
+    slot.width = encoded.width;
+    slot.height = encoded.height;
+    Ok(())
+}
+
 /// Per-page document, laid out on the book's single canvas.
 ///
 /// Every page declares the *same* viewport, which is the size reported to
@@ -351,11 +410,13 @@ fn content_opf(volume: &Volume, slots: &[Slot], canvas: (u32, u32), badged: bool
 /// `original-resolution` as the page size for the whole book and cuts anything
 /// that overflows it.
 ///
-/// So the spread keeps its full pixel dimensions as an image, and CSS fits it
-/// inside the shared canvas. It is shown whole, letterboxed above and below,
-/// and because the stored image is still full resolution, zooming in on a
-/// reader reveals every bit of it.
+/// The `<img>` is declared at the size it is *displayed* at — the image scaled
+/// to fit the canvas — not at its pixel size. Kindle's converter reads those
+/// attributes and ignores `max-width`, so declaring a 2400px-wide image on an
+/// 1100px canvas is a crop no matter what the stylesheet says. The file itself
+/// stays full resolution, which is what zooming shows.
 fn page_xhtml(slot: &Slot, canvas: (u32, u32)) -> String {
+    let (w, h) = fit_within(slot.width, slot.height, canvas);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -374,10 +435,26 @@ fn page_xhtml(slot: &Slot, canvas: (u32, u32)) -> String {
         stem = slot.stem,
         cw = canvas.0,
         ch = canvas.1,
-        w = slot.width,
-        h = slot.height,
         img = slot.image_href(),
     )
+}
+
+/// `width`×`height` scaled to fit inside `canvas`, keeping the ratio. Only ever
+/// shrinks: a page smaller than the canvas is the reader's to scale.
+fn fit_within(width: u32, height: u32, canvas: (u32, u32)) -> (u32, u32) {
+    let (cw, ch) = canvas;
+    if width == 0 || height == 0 || cw == 0 || ch == 0 || (width <= cw && height <= ch) {
+        return (width, height);
+    }
+    // Compare ratios in integers so a page exactly the canvas's shape lands on
+    // the canvas exactly, rather than a pixel short from float rounding.
+    if width as u64 * ch as u64 >= height as u64 * cw as u64 {
+        let h = (height as u64 * cw as u64 / width as u64).max(1) as u32;
+        (cw, h)
+    } else {
+        let w = (width as u64 * ch as u64 / height as u64).max(1) as u32;
+        (w, ch)
+    }
 }
 
 fn nav_xhtml(volume: &Volume, slots: &[Slot], starts: &[ChapterStart]) -> String {
@@ -532,3 +609,20 @@ div.page img {
   object-fit: contain;
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_page_is_declared_at_its_fitted_size_not_its_pixel_size() {
+        // Declaring the pixel size is what Kindle crops.
+        assert_eq!(fit_within(2400, 1650, (1100, 1600)), (1100, 756));
+        assert_eq!(fit_within(1600, 2336, (800, 1168)), (800, 1168));
+    }
+
+    #[test]
+    fn a_page_smaller_than_the_canvas_is_left_alone() {
+        assert_eq!(fit_within(700, 1000, (800, 1168)), (700, 1000));
+    }
+}
