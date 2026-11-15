@@ -23,7 +23,7 @@ const dict: PartialDictionary = {
       "Spreads stay whole. On a Kindle the spread is shown whole, smaller, with white bars above and below — pinch to zoom in.",
     "settingsView.coverBadge": "Volume number on the cover",
     "settingsView.coverBadgeOn":
-      "The cover in your Kindle's library gets the volume number in a corner, so a long series can be told apart at a glance. The book itself still opens on the untouched cover. EPUB only.",
+      "The cover in your Kindle's library gets the volume number on a bookmark ribbon at the left edge, clear of Kindle's own progress marker, so a long series can be told apart at a glance. The book itself still opens on the untouched cover. EPUB only.",
     "settingsView.coverBadgeOff": "The cover is shown exactly as published.",
     "settingsView.pageSize": "Page size",
     "settingsView.pageSizeHint":
@@ -78,7 +78,7 @@ const dict: PartialDictionary = {
       "As páginas duplas ficam inteiras. No Kindle a página dupla aparece inteira, menor, com faixas brancas em cima e embaixo — use o gesto de pinça para ampliar.",
     "settingsView.coverBadge": "Número do volume na capa",
     "settingsView.coverBadgeOn":
-      "A capa na biblioteca do Kindle ganha o número do volume em um canto, para distinguir os volumes de uma série longa num relance. O livro em si continua abrindo na capa original. Só EPUB.",
+      "A capa na biblioteca do Kindle ganha o número do volume numa fita de marcador na borda esquerda, longe do indicador de progresso do Kindle, para distinguir os volumes de uma série longa num relance. O livro em si continua abrindo na capa original. Só EPUB.",
     "settingsView.coverBadgeOff": "A capa aparece exatamente como foi publicada.",
     "settingsView.pageSize": "Tamanho da página",
     "settingsView.pageSizeHint":

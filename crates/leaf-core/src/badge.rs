@@ -2,13 +2,14 @@
 //!
 //! Plenty of manga covers say which volume they are only in small print, or not
 //! in Latin script at all; on a Kindle's shelf, at thumbnail size and in grey,
-//! a run of one series is a wall of near-identical art. A large number in a
-//! corner is what tells them apart.
+//! a run of one series is a wall of near-identical art. A large number on the
+//! cover is what tells them apart.
 //!
-//! It is drawn as a shout balloon — a spiky burst with a heavy outline and a
-//! screentone shadow — lettered in brush strokes, so it reads as part of the
-//! medium rather than as a sticker from a file manager. Everything is black,
-//! white and a dot pattern, which is also what survives an e-ink screen intact.
+//! It is drawn as a bookmark ribbon tucked in from the left edge — black, with
+//! a swallowtail notch at its free end, a white keyline and a screentone shadow
+//! — lettered in white brush strokes. A short stripe rather than a band across
+//! the whole cover, so it labels the volume without hiding the art. Everything
+//! is black, white and a dot pattern, which is what survives an e-ink screen.
 //!
 //! The digits are drawn here rather than with a font crate: ten glyphs is all
 //! that is ever needed, and it keeps a font file and its licence out of the
@@ -24,27 +25,34 @@ use image::{Rgb, RgbImage};
 /// Height of the digits, as a fraction of the cover's width. Width rather than
 /// height because covers vary more in aspect than in how wide they look on a
 /// shelf.
-const DIGIT_HEIGHT: f32 = 0.13;
-/// Gap between the burst's spikes and the cover's edges, as a fraction of width.
-const MARGIN: f32 = 0.02;
-/// The burst's tilt. A balloon set dead level looks typeset; a few degrees off
-/// looks drawn.
-const TILT_DEGREES: f32 = -7.0;
+const DIGIT_HEIGHT: f32 = 0.11;
+/// Where the ribbon's centre line sits, as a fraction of the cover's height.
+///
+/// Kindle's library grid draws over three spots of every cover: the reading
+/// progress ribbon top-right, a "read" tick bottom-left and the menu dots
+/// bottom-right. The left edge a little below the middle is the one place none
+/// of them reach — the old top-right badge sat exactly under the progress
+/// ribbon, so it vanished as soon as a book was opened.
+const CENTRE_Y: f32 = 0.64;
+/// The ribbon's height, relative to the digit height.
+const RIBBON_HEIGHT: f32 = 1.7;
+/// Black between the cover's edge and the first digit, and between the last
+/// digit and the notch, both relative to the digit height.
+const PAD_LEFT: f32 = 0.45;
+const PAD_RIGHT: f32 = 0.3;
+/// Depth of the swallowtail notch, relative to the ribbon's height. That cut is
+/// what makes a stripe read as a bookmark rather than a redaction bar.
+const NOTCH: f32 = 0.32;
+/// Shortest ribbon, as a fraction of the cover's width, so a single "7" does
+/// not get a stub.
+const MIN_LENGTH: f32 = 0.24;
 
-/// Number of spikes around the burst.
-const SPIKES: usize = 16;
-/// Spike lengths, cycled around the burst. Irregular on purpose: evenly sized
-/// spikes look like a gear or a price sticker, not a shout.
-const SPIKE_REACH: [f32; 7] = [1.22, 1.08, 1.3, 1.12, 1.18, 1.04, 1.26];
-/// How far the valleys between spikes sit from the centre, relative to the
-/// ellipse that holds the lettering.
-const VALLEY: f32 = 0.97;
-
-/// Outline thickness, as a fraction of the digit height.
-const OUTLINE: f32 = 0.07;
-/// Screentone shadow: offset from the burst and dot pitch, both as fractions of
-/// the digit height.
-const SHADOW_OFFSET: (f32, f32) = (0.13, 0.16);
+/// White keyline around the ribbon, as a fraction of the digit height. Keeps a
+/// black ribbon from melting into dark art.
+const KEYLINE: f32 = 0.06;
+/// Screentone shadow: offset from the ribbon and dot pitch, both as fractions
+/// of the digit height.
+const SHADOW_OFFSET: (f32, f32) = (0.1, 0.14);
 const TONE_PITCH: f32 = 0.085;
 
 /// Brush width at its fullest, in glyph units; a glyph is 1.6 units tall.
@@ -71,71 +79,59 @@ struct Piece {
     to: f32,
 }
 
-/// Draw `number` in a shout balloon in the cover's top-right corner.
-///
-/// Top-right because a Kindle's library grid puts its own markers along the
-/// bottom of a cover (progress, "new"), and series logos sit top-centre or
-/// top-left far more often than in that corner.
+/// Draw `number` on a bookmark ribbon coming in from the cover's left edge.
 pub fn stamp(image: &mut RgbImage, number: u32) {
     let (width, height) = image.dimensions();
     if width < 64 || height < 64 {
         return;
     }
-    let w = width as f32;
+    let (w, h) = (width as f32, height as f32);
 
-    // Lettering, laid out around the origin in pixels before tilting.
     let digit_h = w * DIGIT_HEIGHT;
     let digits: Vec<Vec<Stroke>> = number.to_string().bytes().map(|b| digit(b - b'0')).collect();
     let (pieces, brush, text_w) = set_line(&digits, digit_h);
 
-    // The ellipse that holds the lettering. Text is a rectangle and the
-    // ellipse only has to clear its corners at the valley line, so this is
-    // somewhat less than the rectangle's circumscribed ellipse.
-    let half_w = text_w / 2.0 + digit_h * 0.18;
-    let half_h = digit_h / 2.0 + digit_h * 0.12;
-    let rx = half_w * 1.28 / VALLEY;
-    let ry = half_h * 1.28 / VALLEY;
-    let burst = burst(rx, ry);
+    let ribbon_h = digit_h * RIBBON_HEIGHT;
+    let notch = ribbon_h * NOTCH;
+    let length = (digit_h * (PAD_LEFT + PAD_RIGHT) + text_w + notch).max(w * MIN_LENGTH);
+    let cy = h * CENTRE_Y;
+    let (top, bottom) = (cy - ribbon_h / 2.0, cy + ribbon_h / 2.0);
 
-    let reach = SPIKE_REACH.iter().cloned().fold(0.0, f32::max);
-    let outline = digit_h * OUTLINE;
+    // Starts off the cover so its left end has no visible edge: it is meant to
+    // look like it runs on behind the book.
+    let ribbon = [
+        (-ribbon_h, top),
+        (length, top),
+        (length - notch, cy),
+        (length, bottom),
+        (-ribbon_h, bottom),
+    ];
+    // Lettering centred in the solid part, between the edge and the notch.
+    let text_cx = (length - notch) / 2.0 + (digit_h * (PAD_LEFT - PAD_RIGHT)) / 2.0;
+
+    let keyline = digit_h * KEYLINE;
     let shadow = (digit_h * SHADOW_OFFSET.0, digit_h * SHADOW_OFFSET.1);
     let pitch = (digit_h * TONE_PITCH).max(2.0);
 
-    // Placed so the longest spike and the shadow stay on the cover whatever the
-    // tilt; the bounding circle is a cheap, safe stand-in for the rotated shape.
-    let extent_x = rx * reach + shadow.0.abs();
-    let extent_y = ry * reach + shadow.1.abs();
-    let radius = extent_x.max(extent_y);
-    let margin = w * MARGIN;
-    let cx = w - margin - extent_x;
-    let cy = margin + extent_y;
-
-    let (sin, cos) = TILT_DEGREES.to_radians().sin_cos();
-    let x0 = (cx - radius).floor().max(0.0) as u32;
-    let x1 = (cx + radius).ceil().min(w) as u32;
-    let y0 = (cy - radius).floor().max(0.0) as u32;
-    let y1 = (cy + radius).ceil().min(height as f32) as u32;
+    let x1 = (length + keyline + shadow.0 + 1.0).ceil().min(w) as u32;
+    let y0 = (top - keyline - 1.0).floor().max(0.0) as u32;
+    let y1 = (bottom + keyline + shadow.1 + 1.0).ceil().min(h) as u32;
 
     for y in y0..y1 {
-        for x in x0..x1 {
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            // Into the balloon's own frame: undo the tilt.
-            let (dx, dy) = (px - cx, py - cy);
-            let local = (dx * cos + dy * sin, -dx * sin + dy * cos);
+        for x in 0..x1 {
+            let p = (x as f32 + 0.5, y as f32 + 0.5);
 
-            let d_burst = polygon_distance(local, &burst);
-            let d_shadow = polygon_distance((local.0 - shadow.0, local.1 - shadow.1), &burst);
-            let in_shadow = coverage(d_shadow);
-            let in_burst = coverage(d_burst);
-            if in_shadow <= 0.0 && in_burst <= 0.0 {
+            let d_ribbon = polygon_distance(p, &ribbon);
+            let in_shadow = coverage(polygon_distance((p.0 - shadow.0, p.1 - shadow.1), &ribbon));
+            let in_keyline = coverage(d_ribbon - keyline);
+            if in_shadow <= 0.0 && in_keyline <= 0.0 {
                 continue;
             }
 
-            let tone = screentone((px, py), pitch);
-            let paper = coverage(d_burst + outline);
-            let ink = if paper > 0.0 {
-                coverage(brush_distance(local, &pieces, brush)) * paper
+            let tone = screentone(p, pitch);
+            let in_ribbon = coverage(d_ribbon);
+            let ink = if in_ribbon > 0.0 {
+                coverage(brush_distance((p.0 - text_cx, p.1 - cy), &pieces, brush)) * in_ribbon
             } else {
                 0.0
             };
@@ -145,10 +141,10 @@ pub fn stamp(image: &mut RgbImage, number: u32) {
                 // Shadow: white paper with a dot tone printed on it.
                 let v = mix(v as f32, 255.0, in_shadow);
                 let v = mix(v, 0.0, in_shadow * tone);
-                // Balloon: black outline, white inside, black lettering.
-                let v = mix(v, 0.0, in_burst);
-                let v = mix(v, 255.0, paper);
-                mix(v, 0.0, ink).round().clamp(0.0, 255.0) as u8
+                // Ribbon: white keyline, black body, white lettering.
+                let v = mix(v, 255.0, in_keyline);
+                let v = mix(v, 0.0, in_ribbon);
+                mix(v, 255.0, ink).round().clamp(0.0, 255.0) as u8
             }));
         }
     }
@@ -235,19 +231,6 @@ fn brush_distance(p: Point, pieces: &[Piece], brush: f32) -> f32 {
             d - brush * brush_profile(piece.from + (piece.to - piece.from) * t)
         })
         .fold(f32::INFINITY, f32::min)
-}
-
-/// The balloon's outline: spikes alternating with valleys around an ellipse.
-fn burst(rx: f32, ry: f32) -> Vec<Point> {
-    (0..SPIKES * 2)
-        .map(|i| {
-            // Offset from 3 o'clock so a spike, not a valley, points into the
-            // cover's corner.
-            let angle = (i as f32 / (SPIKES * 2) as f32) * std::f32::consts::TAU - 0.6;
-            let r = if i % 2 == 0 { SPIKE_REACH[(i / 2) % SPIKE_REACH.len()] } else { VALLEY };
-            (rx * r * angle.cos(), ry * r * angle.sin())
-        })
-        .collect()
 }
 
 /// Ink coverage of a 45° dot screen at `p`, the classic screentone angle.
@@ -414,54 +397,63 @@ mod tests {
     }
 
     #[test]
-    fn the_balloon_sits_in_the_top_right_and_leaves_the_rest_alone() {
+    fn the_ribbon_runs_in_from_the_left_edge_clear_of_kindles_markers() {
         let mut img = grey(600, 900, 128);
         stamp(&mut img, 115);
 
         let (left, top, right, bottom) = touched(&img, 128);
-        assert!(left > 200, "reaches too far left: {left}");
-        assert!(bottom < 450, "reaches too far down: {bottom}");
-        assert!(right < 600 && top > 0, "must stay on the cover");
-        assert!(right > 520 && top < 40, "should sit in the corner: {right},{top}");
+        assert_eq!(left, 0, "must start at the cover's edge, like a bookmark");
+        assert!(right < 360, "a stripe, not a band across the cover: {right}");
+        // Kindle draws its progress ribbon in the top quarter and its tick and
+        // menu dots in the bottom fifth.
+        assert!(top > 900 / 4, "would sit under the progress ribbon: {top}");
+        assert!(bottom < 900 * 4 / 5, "would sit under the tick: {bottom}");
     }
 
     #[test]
-    fn the_balloon_is_white_with_black_lettering() {
+    fn the_ribbon_is_black_with_white_lettering() {
         let mut img = grey(600, 900, 128);
         stamp(&mut img, 115);
 
-        let (left, top, right, bottom) = touched(&img, 128);
-        let (mut dark, mut light) = (0, 0);
-        for y in top..=bottom {
-            for x in left..=right {
-                match img.get_pixel(x, y).0[0] {
-                    0..=40 => dark += 1,
-                    215..=255 => light += 1,
-                    _ => {}
-                }
-            }
-        }
-        assert!(light > dark, "balloon should be mostly paper: {light} vs {dark}");
-        assert!(dark > 2000, "outline and lettering should be inked: {dark}");
+        // Along the centre line, inside the ribbon.
+        let y = (900.0 * CENTRE_Y) as u32;
+        let row: Vec<u8> = (0..200).map(|x| img.get_pixel(x, y).0[0]).collect();
+        let dark = row.iter().filter(|&&v| v < 40).count();
+        let light = row.iter().filter(|&&v| v > 215).count();
+        assert!(dark > light, "ribbon should be mostly black: {dark} vs {light}");
+        assert!(light > 10, "lettering should be white: {light}");
     }
 
     #[test]
-    fn a_longer_number_makes_a_wider_balloon() {
-        let width_of = |n| {
+    fn the_free_end_is_notched_like_a_bookmark() {
+        let mut img = grey(600, 900, 128);
+        stamp(&mut img, 7);
+
+        // The tips reach further right than the centre of the cut.
+        let cy = (900.0 * CENTRE_Y) as u32;
+        let reach = |y: u32| (0..600).rev().find(|&x| img.get_pixel(x, y).0[0] < 40).unwrap();
+        let ribbon_h = 600.0 * DIGIT_HEIGHT * RIBBON_HEIGHT;
+        let near_top = cy - (ribbon_h * 0.4) as u32;
+        assert!(reach(near_top) > reach(cy) + 10, "{} vs {}", reach(near_top), reach(cy));
+    }
+
+    #[test]
+    fn a_longer_number_makes_a_longer_ribbon() {
+        let length_of = |n| {
             let mut img = grey(600, 900, 128);
             stamp(&mut img, n);
-            let (left, _, right, _) = touched(&img, 128);
-            right - left
+            touched(&img, 128).2
         };
-        assert!(width_of(115) > width_of(7));
+        assert!(length_of(1150) > length_of(7));
     }
 
     #[test]
-    fn a_black_cover_still_shows_the_balloon() {
+    fn a_black_cover_still_shows_the_ribbon() {
+        // The keyline is what separates a black ribbon from black art.
         let mut img = grey(600, 900, 0);
         stamp(&mut img, 3);
         let white = img.pixels().filter(|p| p.0[0] > 200).count();
-        assert!(white > 3000, "expected white paper inside the balloon: {white}");
+        assert!(white > 1500, "expected a keyline and lettering: {white}");
     }
 
     #[test]
