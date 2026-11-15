@@ -16,6 +16,9 @@ const dict: PartialDictionary = {
     "settings.compressionCompact": "Compact · 1280px",
     "settings.compressionCompactDetail":
       "When a volume has to fit an email attachment limit. Softer if you zoom right in.",
+    "settings.compressionCustom": "Custom",
+    "settings.compressionCustomDetail":
+      "Your own size and quality — for a device none of the presets fit, or to trade file size against sharpness yourself.",
   },
   "pt-BR": {
     "settings.compressionOriginal": "Original",
@@ -30,6 +33,9 @@ const dict: PartialDictionary = {
     "settings.compressionCompact": "Compacto · 1280px",
     "settings.compressionCompactDetail":
       "Quando um volume precisa caber no limite de anexo de um e-mail. Fica mais suave se você der bastante zoom.",
+    "settings.compressionCustom": "Personalizado",
+    "settings.compressionCustomDetail":
+      "Seu próprio tamanho e qualidade — para um aparelho que nenhuma predefinição atende, ou para equilibrar tamanho de arquivo e nitidez você mesmo.",
   },
 };
 

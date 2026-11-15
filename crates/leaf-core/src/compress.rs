@@ -19,6 +19,13 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// Bounds on a user-chosen longest edge, in pixels. The top is well past any
+/// e-reader made, so it only stops a stray extra digit.
+pub const CUSTOM_EDGE_MIN: u32 = 480;
+pub const CUSTOM_EDGE_MAX: u32 = 8000;
+/// Lowest JPEG quality a user can ask for.
+pub const CUSTOM_QUALITY_MIN: u8 = 30;
+
 /// How hard to work at shrinking pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Compression {
@@ -65,6 +72,20 @@ impl Compression {
         quality: 78,
         grayscale: true,
     };
+
+    /// Settings the user typed in, pulled back inside what makes sense.
+    ///
+    /// Clamped rather than rejected: a typo should produce a usable book, not
+    /// an error at the end of a two-minute build. The floor on the edge is
+    /// there because a 50px "page" is never what anyone meant, and the floor
+    /// on quality because below it JPEG turns screentone into mud.
+    pub fn custom(max_edge: Option<u32>, quality: u8, grayscale: bool) -> Self {
+        Self {
+            max_edge: max_edge.map(|edge| edge.clamp(CUSTOM_EDGE_MIN, CUSTOM_EDGE_MAX)),
+            quality: quality.clamp(CUSTOM_QUALITY_MIN, 100),
+            grayscale,
+        }
+    }
 
     /// Whether this would change a page at all.
     pub fn is_noop(&self) -> bool {
@@ -310,6 +331,22 @@ mod tests {
         if let Some(result) = result {
             assert_eq!((result.width, result.height), (400, 600));
         }
+    }
+
+    #[test]
+    fn custom_settings_are_pulled_back_inside_sensible_bounds() {
+        let silly = Compression::custom(Some(50), 5, true);
+        assert_eq!(silly.max_edge, Some(CUSTOM_EDGE_MIN));
+        assert_eq!(silly.quality, CUSTOM_QUALITY_MIN);
+
+        let typo = Compression::custom(Some(160_000), 255, false);
+        assert_eq!(typo.max_edge, Some(CUSTOM_EDGE_MAX));
+        assert_eq!(typo.quality, 100);
+
+        // In range is kept exactly, and no limit stays no limit.
+        let fine = Compression::custom(Some(1800), 82, true);
+        assert_eq!((fine.max_edge, fine.quality), (Some(1800), 82));
+        assert_eq!(Compression::custom(None, 90, false).max_edge, None);
     }
 
     #[test]

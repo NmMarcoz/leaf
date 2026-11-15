@@ -362,3 +362,62 @@ fn a_chapter_ripped_at_a_different_size_is_not_mistaken_for_furniture() {
     // And the rest of the volume is untouched by the fallback.
     assert_eq!(volume.included_pages().count(), 5 + 6 + 6);
 }
+
+#[test]
+fn a_badged_cover_is_the_library_thumbnail_but_not_a_page() {
+    let (_tmp, root) = fixture();
+    let mut v = scan_volume(&root).unwrap();
+    v.metadata.volume = Some(115);
+
+    let plain = root.join("plain.epub");
+    let badged = root.join("badged.epub");
+    writers::epub::write(&v, &plain).unwrap();
+    let options = writers::WriteOptions {
+        cover_badge: true,
+        ..writers::WriteOptions::ORIGINAL
+    };
+    writers::epub::write_with_progress(&v, &badged, &options, &mut |_, _| {}).unwrap();
+
+    let open = |p: &Path| zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(p).unwrap())).unwrap();
+    let mut zip = open(&badged);
+    let opf = read_entry(&mut zip, "OEBPS/content.opf");
+
+    // Kindle reads the EPUB 2 hint, everything else the EPUB 3 property; both
+    // have to name the badged image, and only one item may claim the role.
+    assert!(opf.contains(r#"<meta name="cover" content="cover-badge"/>"#));
+    assert!(opf.contains(r#"href="images/cover-badge.jpg" media-type="image/jpeg" properties="cover-image""#));
+    assert_eq!(opf.matches("cover-image").count(), 1);
+    // Not in the spine: the book still opens on the real first page.
+    assert_eq!(opf.matches("<itemref").count(), 17);
+    assert!(!opf.contains(r#"idref="cover-badge""#));
+
+    let read_bytes = |zip: &mut zip::ZipArchive<_>, name: &str| {
+        use std::io::Read;
+        let mut b = Vec::new();
+        zip.by_name(name).unwrap().read_to_end(&mut b).unwrap();
+        b
+    };
+    let thumb = image::load_from_memory(&read_bytes(&mut zip, "OEBPS/images/cover-badge.jpg")).unwrap();
+    assert_eq!((thumb.width(), thumb.height()), (PAGE_W, PAGE_H), "same size as the cover");
+
+    // Page one is byte-for-byte what it is without the badge.
+    let mut plain_zip = open(&plain);
+    assert_eq!(
+        read_bytes(&mut zip, "OEBPS/images/p0001.jpg"),
+        read_bytes(&mut plain_zip, "OEBPS/images/p0001.jpg"),
+    );
+}
+
+#[test]
+fn a_volume_without_a_number_gets_no_badge() {
+    let (_tmp, root) = fixture();
+    let mut v = scan_volume(&root).unwrap();
+    v.metadata.volume = None;
+    let out = root.join("unnumbered.epub");
+    let options = writers::WriteOptions { cover_badge: true, ..writers::WriteOptions::ORIGINAL };
+    writers::epub::write_with_progress(&v, &out, &options, &mut |_, _| {}).unwrap();
+
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(&out).unwrap())).unwrap();
+    assert!(zip.by_name("OEBPS/images/cover-badge.jpg").is_err());
+    assert!(read_entry(&mut zip, "OEBPS/content.opf").contains(r#"<meta name="cover" content="img-1"/>"#));
+}

@@ -16,7 +16,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use super::timestamp::now_utc;
-use super::{ensure_parent, esc, media_type, render_page, Progress, Target};
+use super::{ensure_parent, esc, media_type, render_page, Progress, Target, WriteOptions};
 use crate::compress::Compression;
 use crate::page::PageKind;
 use crate::project::{Direction, Volume};
@@ -53,9 +53,12 @@ struct Layout {
     chapters: Vec<ChapterStart>,
 }
 
+/// The badged cover's path inside the package, beside the page images.
+const BADGED_COVER: &str = "images/cover-badge.jpg";
+
 /// Write `volume` to `out` as a fixed-layout EPUB 3.
 pub fn write(volume: &Volume, out: &Path) -> Result<()> {
-    write_with_progress(volume, out, &Compression::ORIGINAL, &mut |_, _| {})
+    write_with_progress(volume, out, &WriteOptions::ORIGINAL, &mut |_, _| {})
 }
 
 /// As [`write`], reporting `(pages_done, pages_total)` as each page is encoded.
@@ -63,13 +66,22 @@ pub fn write(volume: &Volume, out: &Path) -> Result<()> {
 pub fn write_with_progress(
     volume: &Volume,
     out: &Path,
-    compression: &Compression,
+    options: &WriteOptions,
     progress: &mut Progress,
 ) -> Result<()> {
-    let Layout { slots, chapters } = build_slots(volume, compression, progress)?;
+    let Layout { slots, chapters } = build_slots(volume, &options.compression, progress)?;
     if slots.is_empty() {
         bail!("volume has no pages to write");
     }
+
+    let badged = if options.cover_badge {
+        volume
+            .metadata
+            .volume
+            .and_then(|n| badged_cover(&slots[0], n, &options.compression))
+    } else {
+        None
+    };
 
     // One canvas for the whole book. Everything downstream — every page's
     // viewport and the `original-resolution` Kindle reads — is this one number,
@@ -103,6 +115,11 @@ pub fn write_with_progress(
         zip.write_all(page_xhtml(slot, canvas).as_bytes())?;
     }
 
+    if let Some(bytes) = &badged {
+        zip.start_file(format!("OEBPS/{BADGED_COVER}"), stored)?;
+        zip.write_all(bytes)?;
+    }
+
     zip.start_file("OEBPS/nav.xhtml", deflated)?;
     zip.write_all(nav_xhtml(volume, &slots, &chapters).as_bytes())?;
 
@@ -110,10 +127,34 @@ pub fn write_with_progress(
     zip.write_all(toc_ncx(volume, &slots, &chapters).as_bytes())?;
 
     zip.start_file("OEBPS/content.opf", deflated)?;
-    zip.write_all(content_opf(volume, &slots, canvas).as_bytes())?;
+    zip.write_all(content_opf(volume, &slots, canvas, badged.is_some()).as_bytes())?;
 
     zip.finish()?;
     Ok(())
+}
+
+/// The cover with the volume number stamped on it, as a JPEG.
+///
+/// Made from the cover slot's bytes rather than the source file, so it is
+/// exactly the image the book opens on — after splitting, conversion and
+/// resizing — plus the badge. `None` when it cannot be decoded: a cover without
+/// a number is a cosmetic loss, and not worth failing a whole build over.
+fn badged_cover(cover: &Slot, number: u32, compression: &Compression) -> Option<Vec<u8>> {
+    let mut image = image::load_from_memory(&cover.bytes).ok()?.to_rgb8();
+    crate::badge::stamp(&mut image, number);
+    let encoded = crate::compress::render(
+        &image::DynamicImage::ImageRgb8(image),
+        &Compression {
+            // A user-picked cover has not been through the page resizer yet.
+            max_edge: compression.max_edge,
+            // Shelf thumbnails on colour devices are colour, and the badge's
+            // edges are exactly what a low quality setting would smear.
+            quality: 90,
+            grayscale: false,
+        },
+    )
+    .ok()?;
+    Some(encoded.bytes)
 }
 
 /// Flatten the volume into page slots, recording where each chapter begins.
@@ -185,7 +226,10 @@ fn build_slots(
     Ok(Layout { slots, chapters })
 }
 
-fn content_opf(volume: &Volume, slots: &[Slot], canvas: (u32, u32)) -> String {
+/// `badged` says the package carries a badged copy of the cover. It is declared
+/// as the cover image but left out of the spine: the library shows it, and the
+/// book still opens on the untouched first page.
+fn content_opf(volume: &Volume, slots: &[Slot], canvas: (u32, u32), badged: bool) -> String {
     let m = &volume.metadata;
     let identifier = if m.identifier.is_empty() {
         format!("urn:Leaf:{}", m.display_title())
@@ -222,7 +266,8 @@ fn content_opf(volume: &Volume, slots: &[Slot], canvas: (u32, u32)) -> String {
     // Kindle-specific hints. These are EPUB 2 style on purpose; Amazon's
     // converter reads them and ignores the EPUB 3 equivalents above.
     let (norm_w, norm_h) = canvas;
-    meta.push("    <meta name=\"cover\" content=\"img-1\"/>".into());
+    let cover_id = if badged { "cover-badge" } else { "img-1" };
+    meta.push(format!("    <meta name=\"cover\" content=\"{cover_id}\"/>"));
     meta.push("    <meta name=\"book-type\" content=\"comic\"/>".into());
     meta.push("    <meta name=\"fixed-layout\" content=\"true\"/>".into());
     meta.push("    <meta name=\"zero-gutter\" content=\"true\"/>".into());
@@ -242,13 +287,19 @@ fn content_opf(volume: &Volume, slots: &[Slot], canvas: (u32, u32)) -> String {
         "    <item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>".to_string(),
         "    <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>".to_string(),
     ];
+    if badged {
+        manifest.push(format!(
+            "    <item id=\"cover-badge\" href=\"{BADGED_COVER}\" media-type=\"image/jpeg\" properties=\"cover-image\"/>"
+        ));
+    }
     let mut spine = Vec::with_capacity(slots.len());
 
     for (i, slot) in slots.iter().enumerate() {
         let n = i + 1;
         // The first image is the cover, whether it is a dedicated cover file or
-        // simply page one.
-        let props = if i == 0 { " properties=\"cover-image\"" } else { "" };
+        // simply page one — unless a badged copy has taken that role, since only
+        // one item may carry the property.
+        let props = if i == 0 && !badged { " properties=\"cover-image\"" } else { "" };
         manifest.push(format!(
             "    <item id=\"img-{n}\" href=\"{}\" media-type=\"{}\"{props}/>",
             slot.image_href(),
