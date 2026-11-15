@@ -76,6 +76,10 @@ enum Command {
         /// than any e-reader can display.
         #[arg(long, value_enum, default_value_t = Compress::Kindle)]
         compress: Compress,
+        /// Leave the cover as it is instead of stamping the volume number on
+        /// the copy a reader's library shows. EPUB only.
+        #[arg(long)]
+        no_badge: bool,
     },
 }
 
@@ -128,7 +132,8 @@ fn main() -> Result<()> {
             ltr,
             keep_spreads,
             compress,
-        } => build(folder, out, format, title, author, ltr, keep_spreads, compress),
+            no_badge,
+        } => build(folder, out, format, title, author, ltr, keep_spreads, compress, no_badge),
     }
 }
 
@@ -264,6 +269,7 @@ fn build(
     ltr: bool,
     keep_spreads: bool,
     compress: Compress,
+    no_badge: bool,
 ) -> Result<()> {
     let mut volume = scan_volume(&folder)?;
 
@@ -290,15 +296,14 @@ fn build(
         bail!("no pages found in {}", folder.display());
     }
 
-    let compression = compress.settings();
+    let options = leaf_core::WriteOptions {
+        compression: compress.settings(),
+        cover_badge: !no_badge,
+    };
     let mut progress = |_: usize, _: usize| {};
     match format {
-        Format::Epub => {
-            writers::epub::write_with_progress(&volume, &out, &compression, &mut progress)?
-        }
-        Format::Cbz => {
-            writers::cbz::write_with_progress(&volume, &out, &compression, &mut progress)?
-        }
+        Format::Epub => writers::epub::write_with_progress(&volume, &out, &options, &mut progress)?,
+        Format::Cbz => writers::cbz::write_with_progress(&volume, &out, &options, &mut progress)?,
     }
 
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);

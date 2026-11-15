@@ -21,6 +21,10 @@ const dict: PartialDictionary = {
       "Each spread becomes two pages, right half first for manga. Kindle zooms into part of a wide page instead of fitting it, so this is almost always what you want.",
     "settingsView.splitSpreadsOff":
       "Spreads stay whole. Fine on a tablet or a desktop reader; on a Kindle you will see half the drawing.",
+    "settingsView.coverBadge": "Volume number on the cover",
+    "settingsView.coverBadgeOn":
+      "The cover in your Kindle's library gets the volume number in a corner, so a long series can be told apart at a glance. The book itself still opens on the untouched cover. EPUB only.",
+    "settingsView.coverBadgeOff": "The cover is shown exactly as published.",
     "settingsView.pageSize": "Page size",
     "settingsView.pageSizeHint":
       "Black-and-white pages are stored as greyscale, which removes about a third again. Colour covers keep their colour, and a page already smaller than the limit is left alone.",
@@ -72,6 +76,10 @@ const dict: PartialDictionary = {
       "Cada página dupla vira duas páginas, com a metade direita primeiro para mangá. O Kindle amplia parte de uma página larga em vez de ajustá-la, então isso é quase sempre o que você quer.",
     "settingsView.splitSpreadsOff":
       "As páginas duplas ficam inteiras. Bom para um tablet ou um leitor de desktop; no Kindle você verá metade do desenho.",
+    "settingsView.coverBadge": "Número do volume na capa",
+    "settingsView.coverBadgeOn":
+      "A capa na biblioteca do Kindle ganha o número do volume em um canto, para distinguir os volumes de uma série longa num relance. O livro em si continua abrindo na capa original. Só EPUB.",
+    "settingsView.coverBadgeOff": "A capa aparece exatamente como foi publicada.",
     "settingsView.pageSize": "Tamanho da página",
     "settingsView.pageSizeHint":
       "Páginas em preto e branco são salvas em escala de cinza, o que reduz o tamanho em cerca de mais um terço. Capas coloridas mantêm a cor, e uma página já menor que o limite é deixada como está.",

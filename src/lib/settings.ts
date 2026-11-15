@@ -11,13 +11,32 @@ export interface Settings {
   folder_per_series: boolean;
   /** Cut double-page spreads into two pages. On by default, for Kindle. */
   split_spreads: boolean;
-  /** `original` | `large` | `kindle` | `compact` */
+  /** Stamp the volume number on the cover a reader's library shows. EPUB only. */
+  cover_badge: boolean;
+  /** `original` | `large` | `kindle` | `compact` | `custom` */
   compression: string;
+  /** The numbers behind `custom`; kept while a preset is selected. */
+  custom_compression: Compression;
   /** Whether the first-run screen has been answered. */
   welcomed: boolean;
   /** The version this install last showed a "what's new" panel for. */
   last_seen_version: string | null;
 }
+
+/** Mirrors `leaf_core::Compression`. */
+export interface Compression {
+  /** Longest edge in pixels; `null` keeps pages at their original size. */
+  max_edge: number | null;
+  /** JPEG quality, 1–100. */
+  quality: number;
+  /** Store black-and-white pages as greyscale. */
+  grayscale: boolean;
+}
+
+/** Mirror `CUSTOM_*` in `leaf-core/src/compress.rs`; the backend clamps to these. */
+export const CUSTOM_EDGE_MIN = 480;
+export const CUSTOM_EDGE_MAX = 8000;
+export const CUSTOM_QUALITY_MIN = 30;
 
 export const getSettings = () => invoke<Settings>("get_settings");
 
@@ -99,5 +118,11 @@ export const COMPRESSION_PRESETS: {
     label: "Compact · 1280px",
     detail:
       "When a volume has to fit an email attachment limit. Softer if you zoom right in.",
+  },
+  {
+    value: "custom",
+    label: "Custom",
+    detail:
+      "Your own size and quality — for a device none of the presets fit, or to trade file size against sharpness yourself.",
   },
 ];

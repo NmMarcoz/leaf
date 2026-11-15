@@ -475,7 +475,7 @@ pub async fn build_library_volumes(
             root: &root,
             folder_per_series: settings.folder_per_series,
             split_spreads: settings.split_spreads,
-            compression: settings::compression(&settings.compression),
+            write: settings::write_options(&settings),
         };
 
         let mut built = Vec::new();
@@ -570,7 +570,7 @@ struct BuildOptions<'a> {
     root: &'a std::path::Path,
     folder_per_series: bool,
     split_spreads: bool,
-    compression: leaf_core::Compression,
+    write: leaf_core::WriteOptions,
 }
 
 /// Assemble one stored volume and write it out.
@@ -593,10 +593,10 @@ fn build_one(
 
     match options.format {
         Format::Epub => {
-            writers::epub::write_with_progress(&volume, &out, &options.compression, &mut progress)?
+            writers::epub::write_with_progress(&volume, &out, &options.write, &mut progress)?
         }
         Format::Cbz => {
-            writers::cbz::write_with_progress(&volume, &out, &options.compression, &mut progress)?
+            writers::cbz::write_with_progress(&volume, &out, &options.write, &mut progress)?
         }
     }
 

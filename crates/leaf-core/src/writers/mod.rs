@@ -36,6 +36,31 @@ const SPLIT_QUALITY: u8 = 92;
 /// Callback invoked as `(pages_done, pages_total)` while a volume is written.
 pub type Progress<'a> = dyn FnMut(usize, usize) + 'a;
 
+/// How a volume is written, beyond what the `Volume` itself says.
+///
+/// Kept apart from the volume because these are the user's standing
+/// preferences, not facts about this book, and the editor must not have to
+/// carry them back and forth across IPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteOptions {
+    pub compression: Compression,
+    /// Stamp the volume number onto the cover the reader's library shows.
+    ///
+    /// EPUB only, and only the library thumbnail: the badged copy is not in
+    /// the spine, so the pages read are unchanged. A CBZ reader takes its
+    /// thumbnail from page one, which there is no way to badge without
+    /// altering the book, and those readers show the number themselves.
+    pub cover_badge: bool,
+}
+
+impl WriteOptions {
+    /// Every page exactly as found, nothing added.
+    pub const ORIGINAL: Self = Self {
+        compression: Compression::ORIGINAL,
+        cover_badge: false,
+    };
+}
+
 /// One image as it will appear in the output: raw bytes, the extension they
 /// should be stored under, and the dimensions the page must be laid out at.
 pub struct Rendered {

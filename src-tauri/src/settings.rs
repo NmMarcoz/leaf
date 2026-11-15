@@ -55,15 +55,26 @@ pub struct Settings {
     pub default_format: String,
     /// Put each volume in a folder named after its series.
     pub folder_per_series: bool,
-    /// How hard to shrink pages on export: `original`, `large`, `kindle` or
-    /// `compact`. Named rather than numeric so the meaning survives a change to
-    /// what the numbers are.
+    /// How hard to shrink pages on export: `original`, `large`, `kindle`,
+    /// `compact` or `custom`. Named rather than numeric so the meaning survives
+    /// a change to what the numbers are.
     pub compression: String,
+    /// The numbers behind `custom`.
+    ///
+    /// Kept even while a preset is selected, so trying a preset and coming back
+    /// does not lose what the user had dialled in.
+    pub custom_compression: leaf_core::Compression,
     /// Cut double-page spreads into two pages.
     ///
     /// On by default because that is what a Kindle needs; readers that handle a
     /// wide page properly can turn it off.
     pub split_spreads: bool,
+    /// Stamp the volume number onto the cover a reader's library shows.
+    ///
+    /// On by default: at thumbnail size, in grey, one series' covers are often
+    /// impossible to tell apart. Only the library image changes; the book
+    /// still opens on its untouched first page.
+    pub cover_badge: bool,
     pub delivery: DeliveryConfig,
     /// Whether the first-run screen has been answered.
     ///
@@ -88,7 +99,9 @@ struct Stored {
     default_format: Option<String>,
     folder_per_series: Option<bool>,
     split_spreads: Option<bool>,
+    cover_badge: Option<bool>,
     compression: Option<String>,
+    custom_compression: Option<leaf_core::Compression>,
     delivery: Option<DeliveryConfig>,
     welcomed: Option<bool>,
     last_seen_version: Option<String>,
@@ -118,9 +131,14 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
         // series is the thing this is meant to avoid.
         folder_per_series: stored.folder_per_series.unwrap_or(true),
         split_spreads: stored.split_spreads.unwrap_or(true),
+        cover_badge: stored.cover_badge.unwrap_or(true),
         // Sized for a Kindle by default: this app exists to put volumes on one,
         // and an untouched scrape is routinely three times the size it needs.
         compression: stored.compression.unwrap_or_else(|| "kindle".into()),
+        // Starts from the Kindle preset: the nearest sensible thing to tweak.
+        // Clamped on the way in too, so a hand-edited file shows the values
+        // that will actually be used.
+        custom_compression: custom(stored.custom_compression.unwrap_or_default()),
         delivery: stored.delivery.unwrap_or_default(),
         welcomed: stored.welcomed.unwrap_or(false),
         last_seen_version: stored.last_seen_version,
@@ -137,7 +155,9 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
             default_format: Some(next.default_format.clone()),
             folder_per_series: Some(next.folder_per_series),
             split_spreads: Some(next.split_spreads),
+            cover_badge: Some(next.cover_badge),
             compression: Some(next.compression.clone()),
+            custom_compression: Some(custom(next.custom_compression)),
             delivery: Some(next.delivery.clone()),
             welcomed: Some(next.welcomed),
             last_seen_version: next.last_seen_version.clone(),
@@ -146,13 +166,27 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
 }
 
 /// Turn the stored preset name into the settings the writers take.
-pub fn compression(name: &str) -> leaf_core::Compression {
+pub fn compression(settings: &Settings) -> leaf_core::Compression {
     use leaf_core::Compression;
-    match name {
+    match settings.compression.as_str() {
         "original" => Compression::ORIGINAL,
         "large" => Compression::LARGE,
         "compact" => Compression::COMPACT,
+        "custom" => custom(settings.custom_compression),
         _ => Compression::KINDLE,
+    }
+}
+
+fn custom(c: leaf_core::Compression) -> leaf_core::Compression {
+    leaf_core::Compression::custom(c.max_edge, c.quality, c.grayscale)
+}
+
+/// What the writers need from the settings, so the editor's build and a batch
+/// build cannot disagree about it.
+pub fn write_options(settings: &Settings) -> leaf_core::WriteOptions {
+    leaf_core::WriteOptions {
+        compression: compression(settings),
+        cover_badge: settings.cover_badge,
     }
 }
 

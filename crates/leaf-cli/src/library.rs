@@ -98,6 +98,10 @@ pub enum LibraryCommand {
         volume: String,
         #[arg(short, long)]
         out: PathBuf,
+        /// Leave the cover as it is instead of stamping the volume number on
+        /// the copy a reader's library shows. EPUB only.
+        #[arg(long)]
+        no_badge: bool,
     },
     /// Download any published volume covers not already on disk.
     DownloadCovers { series: i64 },
@@ -134,8 +138,8 @@ pub fn run(root: Option<PathBuf>, command: LibraryCommand) -> Result<()> {
         LibraryCommand::Batch { series, url, dry_run } => {
             batch(&library, &registry, SeriesId(series), url.as_deref(), dry_run)
         }
-        LibraryCommand::Build { series, volume, out } => {
-            build(&library, SeriesId(series), &volume, &out)
+        LibraryCommand::Build { series, volume, out, no_badge } => {
+            build(&library, SeriesId(series), &volume, &out, !no_badge)
         }
         LibraryCommand::DownloadCovers { series } => download_covers(&library, SeriesId(series)),
     }
@@ -779,15 +783,29 @@ fn fetch_one(library: &Library, id: SeriesId, number: &str, url: &str) -> Result
     Ok(written.len())
 }
 
-fn build(library: &Library, id: SeriesId, volume_number: &str, out: &PathBuf) -> Result<()> {
+fn build(
+    library: &Library,
+    id: SeriesId,
+    volume_number: &str,
+    out: &PathBuf,
+    cover_badge: bool,
+) -> Result<()> {
     let volume = library.build_volume(id, volume_number)?;
     if volume.total_included() == 0 {
         bail!("volume {volume_number} has no pages");
     }
 
+    // Pages as stored, as before; only the badge is the user's to choose here.
+    let options = leaf_core::WriteOptions {
+        cover_badge,
+        ..leaf_core::WriteOptions::ORIGINAL
+    };
+    let mut progress = |_: usize, _: usize| {};
     match out.extension().and_then(|e| e.to_str()) {
-        Some("cbz") => leaf_core::writers::cbz::write(&volume, out)?,
-        _ => leaf_core::writers::epub::write(&volume, out)?,
+        Some("cbz") => {
+            leaf_core::writers::cbz::write_with_progress(&volume, out, &options, &mut progress)?
+        }
+        _ => leaf_core::writers::epub::write_with_progress(&volume, out, &options, &mut progress)?,
     }
 
     let size = std::fs::metadata(out).map(|m| m.len()).unwrap_or(0);
