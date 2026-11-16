@@ -20,7 +20,6 @@
 //! - [`reader`] — reading a downloaded chapter; library only, works offline
 
 mod export;
-mod update;
 mod fetch;
 mod harvest;
 mod library;
@@ -31,6 +30,7 @@ mod settings;
 mod sources;
 mod tasks;
 mod thumbs;
+mod update;
 mod util;
 mod volume;
 
@@ -86,6 +86,10 @@ pub fn run() {
             meta::similar_series,
             meta::save_cover,
             sources::list_sources,
+            sources::review_extensions,
+            sources::approve_extension,
+            sources::set_extension_dev,
+            sources::lock_extension,
             sources::search_source,
             sources::popular_source,
             sources::latest_source,
@@ -132,4 +136,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Leaf");
 }
-

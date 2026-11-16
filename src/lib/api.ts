@@ -215,8 +215,39 @@ export interface SourceMangaDetails {
   cover_url: string | null;
 }
 
+/** A user extension that loads fine but sits at the trust gate, awaiting
+ * approval. Mirrors `PendingInfo` / `DevInfo` (same shape, two queues). */
+export interface ExtensionInfo extends SourceInfo {
+  file: string;
+  fingerprint: string;
+}
+
+/** What the gate currently sees in the extensions folder. Mirrors
+ * `ExtensionReview`: `pending` awaits a decision, `dev` runs unlocked until
+ * the author locks it. */
+export interface ExtensionReview {
+  pending: ExtensionInfo[];
+  dev: ExtensionInfo[];
+}
+
 /** Every registered source, for an Add-from-source or Explore picker. */
 export const listSources = () => invoke<SourceInfo[]>("list_sources");
+
+/** The extensions folder as the trust gate sees it. */
+export const reviewExtensions = () => invoke<ExtensionReview>("review_extensions");
+
+/** Approve one extension, by the fingerprint it was shown with. */
+export const approveExtension = (fingerprint: string) =>
+  invoke<void>("approve_extension", { fingerprint });
+
+/** Put one extension file into (or out of) development mode. */
+export const setExtensionDev = (file: string, dev: boolean) =>
+  invoke<void>("set_extension_dev", { file, dev });
+
+/** Freeze a dev extension's current bytes as its approval. Returns the
+ * fingerprint that was locked — computed by the backend from the file. */
+export const lockExtension = (file: string) =>
+  invoke<string>("lock_extension", { file });
 
 /** Search one registered source's own catalogue. */
 export const searchSource = (source: string, query: string, page: number) =>
