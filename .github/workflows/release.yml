@@ -58,6 +58,10 @@ jobs:
         with:
           workspaces: ". -> target"
           key: check
+          # A failing run is exactly when CI gets re-run several times in a
+          # row. Without this each retry starts cold, and a cold run is the
+          # 45-minute one.
+          cache-on-failure: true
       - run: bun install --frozen-lockfile
       - run: cargo test --workspace
       - run: bun run build
@@ -148,29 +152,91 @@ jobs:
           fi
           echo "version $conf matches tag $GITHUB_REF_NAME"
 
-  build:
+  # Makes the release once, before any platform builds, so nothing downstream
+  # ever has to decide whether to create it.
+  #
+  # The platforms used to run one at a time because tauri-action creates the
+  # release when it cannot find one: run together, two runners both found
+  # nothing and both created one (v1.8.0, 0.7s apart — two releases on one tag,
+  # half the installers on each). With the release made here first, that race
+  # is gone, and the builds below run side by side.
+  #
+  # A draft, not published: the updater reads the latest *published* release,
+  # and publishing before every platform has uploaded means installed copies
+  # see a `latest.json` that does not name them yet. `publish` flips it once
+  # everything is there.
+  #
+  # Skipped on a build-only run, which is how the jobs below know to upload
+  # nothing.
+  create-release:
     needs: [check, prepare, check-version]
-    # `prepare` and `check-version` are each skipped on the paths they do not
-    # apply to, so the build runs unless one of them actually failed. `check`
-    # always runs and must pass.
     if: |
       always()
       && needs.check.result == 'success'
       && needs.prepare.result != 'failure'
       && needs.check-version.result != 'failure'
+      && (needs.prepare.outputs.tag != '' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
+
+      - name: Create the draft (or reuse it on a re-run)
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Looked up by listing, not by `releases/tags/…`: that endpoint does
+          # not see drafts, and a re-run of a failed release must find the
+          # draft it left rather than making a second one beside it.
+          release_id() {
+            # sed, not head: head exits early and pipefail would count the
+            # SIGPIPE it sends gh as a failure.
+            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | sed -n 1p
+          }
+          id=$(release_id)
+          if [ -z "$id" ]; then
+            # What's new first: it is what the update card in the app shows,
+            # and on Android the card reads the release body itself.
+            { cat .github/whats-new.md; echo; cat .github/release-notes.md; } > "$RUNNER_TEMP/body.md"
+            gh release create "$TAG" --draft --verify-tag \
+              --title "Leaf $TAG" --notes-file "$RUNNER_TEMP/body.md"
+            id=$(release_id)
+          else
+            echo "release for $TAG already exists ($id); reusing it"
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::created the release for $TAG but cannot find it"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [check, prepare, check-version, create-release]
+    # `prepare`, `check-version` and `create-release` are each skipped on the
+    # paths they do not apply to, so the build runs unless one of them actually
+    # failed. `check` always runs and must pass.
+    if: |
+      always()
+      && needs.check.result == 'success'
+      && needs.prepare.result != 'failure'
+      && needs.check-version.result != 'failure'
+      && needs.create-release.result != 'failure'
 
     strategy:
       fail-fast: false
-      # One at a time, and this is load-bearing rather than thrift.
-      #
-      # tauri-action creates the release when it cannot find one for the tag.
-      # Run in parallel, both platforms look at the same moment, both find
-      # nothing, and both create one — leaving two release objects on a single
-      # tag with half the installers on each, and a `latest.json` naming only
-      # the platform that happened to win. v1.8.0 did exactly that, 0.7s apart.
-      # Serialised, the first job creates the release and the second finds it
-      # and merges into its `latest.json`, which is what the updater needs.
-      max-parallel: 1
+      # No max-parallel. The two things that once made parallel builds unsafe
+      # are both handled elsewhere: `create-release` makes the release up front,
+      # and `publish` writes `latest.json` once at the end instead of each
+      # runner merging into it (which lost whichever platform wrote first).
       matrix:
         include:
           # One universal binary rather than separate Intel and Apple Silicon
@@ -242,14 +308,14 @@ jobs:
         with:
           workspaces: ". -> target"
           key: ${{ matrix.platform }}
+          cache-on-failure: true
 
       - run: bun install --frozen-lockfile
 
-      # Re-run the tests per platform. File naming and path handling are where
-      # this codebase differs across operating systems, and the gate job only
-      # covers Linux.
-      - name: Test on this platform
-        run: cargo test --workspace
+      # No `cargo test` here: it is a debug build that shares nothing with the
+      # release build after it, and on a cold cache it was over half of each
+      # runner's time. The per-platform tests are the `test` job now, running
+      # beside this one and gating `publish`.
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -268,36 +334,13 @@ jobs:
           # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          # Empty on a build-only run, which makes tauri-action build without
-          # creating or touching a release.
-          tagName: ${{ needs.prepare.outputs.tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
-          releaseName: "Leaf ${{ needs.prepare.outputs.tag || github.ref_name }}"
-          releaseBody: |
-            Download the installer for your platform below.
-
-            - **macOS** — `.dmg`. Unsigned for now, so the first launch needs
-              right-click → Open. Updates afterwards are automatic.
-            - **Windows** — `.exe` for a normal install, `.msi` if you prefer it.
-            - **Linux** — `.deb` for Debian/Ubuntu/Mint, `.rpm` for
-              Fedora/openSUSE, and the `.AppImage` for everything else
-              (Arch gets it through the AUR build or the AppImage directly).
-              The in-app updater covers Linux too, via the `.tar.gz`.
-            - **Android** — `.apk`, arm64. Sideload it; there is no store
-              listing, so the phone will ask you to allow installing from this
-              source. Reading and downloading work; building a volume writes it
-              to the app's own storage, and the Share button on a built volume
-              is how it gets anywhere else.
-
-            The `.sig`, `.tar.gz` and `latest.json` files are what the in-app
-            updater reads. You do not need to download them.
-          # Published straight away: the updater reads the latest *published*
-          # release, so this is what makes an update reach users.
-          releaseDraft: false
-          prerelease: false
-          # Both a .msi and an NSIS .exe are built. Without this the updater JSON
-          # points at the .msi, whose installer needs elevation and so prompts for
-          # UAC on every single update.
-          updaterJsonPreferNsis: true
+          # The draft `create-release` made, by id: drafts cannot be found by
+          # tag. Empty on a build-only run, which makes tauri-action build
+          # without touching any release.
+          releaseId: ${{ needs.create-release.outputs.id }}
+          # `publish` writes it once, from every platform's signature. Letting
+          # each runner merge into it is the race that kept these serialised.
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
       # Only useful for the build-without-releasing path; on a release the
@@ -317,20 +360,49 @@ jobs:
             target/**/release/bundle/rpm/*.rpm
             target/**/release/bundle/appimage/*.AppImage
 
+  # The per-platform tests that used to run inside each build. File naming and
+  # path handling are where this codebase differs across operating systems, and
+  # `check` only covers Linux — so they stay, but beside the builds instead of
+  # in front of them. They gate `publish`, not the tag: a failure here leaves a
+  # draft nobody sees rather than a release.
+  test:
+    needs: [check, prepare, check-version]
+    if: |
+      always()
+      && needs.check.result == 'success'
+      && needs.prepare.result != 'failure'
+      && needs.check-version.result != 'failure'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: test-${{ matrix.platform }}
+          cache-on-failure: true
+      - run: cargo test --workspace
+
   # Android is a separate job rather than another entry in the build matrix:
   # tauri-action knows nothing about APKs, the signing is ours, and the runner
   # needs a JDK and an NDK that no desktop platform wants.
   android:
-    # After the desktop build rather than beside it, so the release already
-    # exists and tauri-action owns its body. Both jobs attaching to the same tag
-    # at once means whichever lost would create the release with no notes.
-    needs: [check, prepare, check-version, build]
+    # Beside the desktop builds, not after them. It used to wait so that
+    # tauri-action had created the release (with its notes) before the APK was
+    # attached; `create-release` does that up front now.
+    needs: [check, prepare, check-version, create-release]
     if: |
       always()
       && needs.check.result == 'success'
-      && needs.build.result == 'success'
       && needs.prepare.result != 'failure'
       && needs.check-version.result != 'failure'
+      && needs.create-release.result != 'failure'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -363,6 +435,7 @@ jobs:
         with:
           workspaces: ". -> target"
           key: android
+          cache-on-failure: true
 
       # The runner image ships several NDKs. Picking the newest rather than
       # pinning one means this does not break when the image is updated.
@@ -411,18 +484,17 @@ jobs:
           mv target/leaf-release.apk "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
-      # The desktop build's release is created by tauri-action, which runs in a
-      # different job. Attaching here rather than creating means whichever
-      # finishes second adds to the release the first one made.
+      # Attached to the draft `create-release` made; `gh release upload`
+      # resolves a draft by its pending tag.
       # `gh` rather than an action that wraps it: softprops/action-gh-release
       # takes the tag it updates from `github.ref`, which on a workflow_dispatch
       # run is `refs/heads/main` and not a tag at all, so it found the release
       # and then failed trying to rename it to a branch.
       - name: Attach to the release
-        if: ${{ needs.prepare.outputs.tag != '' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ needs.create-release.outputs.tag != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.prepare.outputs.tag || github.ref_name }}
+          TAG: ${{ needs.create-release.outputs.tag }}
           APK: ${{ steps.apk.outputs.path }}
         run: gh release upload "$TAG" "$APK" --clobber
 
@@ -434,3 +506,54 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: ${{ steps.apk.outputs.path }}
+
+  # The only job that makes a release visible. It runs once everything else
+  # has succeeded, writes `latest.json` from the signatures all the platforms
+  # uploaded, and only then takes the release out of draft — so installed
+  # copies never see a release that is missing their platform.
+  #
+  # tauri-action used to write `latest.json` itself, each runner merging its
+  # own platform in. `scripts/latest-json.py` produces the same file (checked
+  # against v1.0.0's), once, which is what lets the builds run in parallel.
+  publish:
+    needs: [create-release, build, android, test]
+    if: |
+      always()
+      && needs.create-release.result == 'success'
+      && needs.build.result == 'success'
+      && needs.android.result == 'success'
+      && needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - name: Write latest.json and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/updater"
+          mkdir -p "$work/sigs"
+          gh release download "$TAG" -p '*.sig' -D "$work/sigs"
+          # Only what's new, not the download instructions: these notes are
+          # what the desktop update card shows, to someone who already has
+          # the app installed.
+          python3 scripts/latest-json.py \
+            --tag "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --notes .github/whats-new.md --out "$work/latest.json" \
+            "$work"/sigs/*.sig
+
+          # Every desktop platform must be in it. A platform missing here would
+          # otherwise publish fine and silently never update.
+          for key in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
+            if ! jq -e --arg k "$key" '.platforms | has($k)' "$work/latest.json" >/dev/null; then
+              echo "::error::latest.json has no $key entry"
+              exit 1
+            fi
+          done
+
+          gh release upload "$TAG" "$work/latest.json" --clobber
+          gh release edit "$TAG" --draft=false --latest
