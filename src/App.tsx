@@ -100,6 +100,13 @@ export default function App() {
   // Owned here so the OS listener lives as long as the window; Settings edits it.
   const [theme, setTheme] = useTheme();
   const { tasks, active } = useTasks();
+  // Every task that has finished, one way or another. An add-through-source
+  // row fills its cover and chapter counts on the task thread, so the shelf
+  // re-reads whenever this grows — a number the view can key an effect on
+  // without re-fetching on every progress tick of a running download.
+  const settleCount = tasks.filter(
+    (task) => task.state !== "queued" && task.state !== "running",
+  ).length;
 
   const updater = useUpdater();
 
@@ -335,6 +342,7 @@ export default function App() {
           onOpenSeries={(id) => setView({ kind: "series", id, selectedVolume: null })}
           onOpenFolder={() => void pickFolder()}
           onError={setError}
+          settleCount={settleCount}
         />
       );
     }

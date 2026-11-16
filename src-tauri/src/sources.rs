@@ -340,12 +340,22 @@ pub async fn volumes_source(
     .await
 }
 
-/// Add a series found through a registered source, then pull its layout —
-/// the `add_series_from_source` counterpart to `library::library_add_series`.
+/// Add a series found through a registered source.
 ///
-/// `fallback_title` is the title already on hand from the catalogue listing
-/// this series was picked from — used only if the source's own detail page
-/// fails, or leaves a field blank; see `MangaDetails::best_effort`.
+/// Only what the dialog already has — the catalogue listing's title, and the
+/// source/ids the click carried — is written before returning; the whole
+/// network tail (details, chapter layout, cover) runs as a task on the queue.
+/// This command used to be a synchronous waterfall of four to six sequential
+/// round-trips behind one button click: five to seven seconds of spinner on
+/// a normal day, and twenty-plus when a call hit the timeout. A row that
+/// exists and fills in a few seconds later is the same end state with none
+/// of the waiting; a failed tail stays recoverable with Refresh, exactly as
+/// the old `let _ = pull_layout(...)` made it, except visibly now — the task
+/// panel says so.
+///
+/// `fallback_title` is the title from the catalogue listing, used until the
+/// source's own detail page answers (see `MangaDetails::best_effort` in the
+/// task, which overwrites it with what it finds).
 #[tauri::command]
 pub async fn add_series_from_source(
     app: AppHandle,
@@ -354,46 +364,74 @@ pub async fn add_series_from_source(
     fallback_title: String,
 ) -> Result<Series, String> {
     blocking(move || {
+        // Only the registry lookup — the one thing that must fail the click
+        // itself ("that source does not exist"), and it is disk-and-VM work,
+        // not network.
         let registry = load_registry(&app)?;
-        let ext_source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
-        let details: MangaDetails =
-            MangaDetails::best_effort(ext_source.as_ref(), &external_id, &fallback_title);
+        if registry.get(&source).is_none() {
+            return Err(anyhow!("{source:?} is not a registered source"));
+        }
 
         let mut library = Library::open(settings::library_root(&app)?)?;
         let added = library.add_series(NewSeries {
             source: Some(source.clone()),
             source_id: Some(external_id.clone()),
-            title: details.title,
-            title_romaji: details.title_romaji,
-            title_native: details.title_native,
-            author: details.author.unwrap_or_default(),
-            artist: details.artist.unwrap_or_default(),
-            description: details.description.unwrap_or_default(),
+            title: fallback_title.clone(),
+            title_romaji: None,
+            title_native: None,
+            author: String::new(),
+            artist: String::new(),
+            description: String::new(),
             year: None,
             status: None,
             site_url: None,
-            tags: details.tags,
-            content_rating: details.content_rating,
+            tags: Vec::new(),
+            content_rating: None,
         })?;
 
-        // Best effort from here, same as `library_add_series`: a series with
-        // no layout yet is recoverable with Refresh, a failed add is not.
-        let _ = pull_layout(
-            &mut library,
-            added.id,
-            ext_source.as_ref(),
-            &external_id,
-            &added.title,
-        );
-        if let Some(url) = details.cover_url {
-            if let Ok(bytes) = leaf_meta::download_image(&url) {
-                let _ = library.set_cover(added.id, &bytes);
+        // One-worker queue means this lands behind any download the user
+        // already started, which is right: the click asked for the add first.
+        let series_id = added.id;
+        let label = fallback_title;
+        // The task owns its own handle; `enqueue` keeps the one it was given.
+        let inside = app.clone();
+        crate::tasks::enqueue(&app, "metadata", &label, move |progress| {
+            let app = inside;
+            if progress.cancelled() {
+                return Ok(None);
             }
-        }
+            progress.step("details and cover", 0, 2);
+            let library = Library::open(settings::library_root(&app)?)?;
+            let series = library.series(series_id)?;
+            // Best effort inside: a blank blurb is recoverable, an
+            // errored-out task that deleted nothing is not worse.
+            let _ = crate::library::refetch_metadata(&app, &library, &series);
 
-        library.series(added.id)
+            if progress.cancelled() {
+                return Ok(Some("added; layout not pulled — refresh it later".into()));
+            }
+            progress.step("chapter list", 1, 2);
+            let registry = load_registry(&app)?;
+            let ext_source = registry
+                .get(&source)
+                .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+            let mut library = Library::open(settings::library_root(&app)?)?;
+            let title = library.series(series_id)?.title;
+            match pull_layout(&mut library, series_id, ext_source.as_ref(), &external_id, &title) {
+                Ok(report) => {
+                    progress.step("", 2, 2);
+                    Ok(Some(format!(
+                        "{} chapters in {} volumes",
+                        report.chapters_added, report.volumes
+                    )))
+                }
+                // The series is in the library; only its shelves are empty
+                // until Refresh. Saying so beats marking the whole add failed.
+                Err(e) => Ok(Some(format!("layout pull failed ({e:#}); use Refresh"))),
+            }
+        });
+
+        Ok(added)
     })
     .await
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   BookOpen,
@@ -50,6 +50,12 @@ interface LibraryViewProps {
   /** Escape hatch to the original scan-a-folder path. */
   onOpenFolder: () => void;
   onError: (message: string | null) => void;
+  /**
+   * How many queued tasks have finished. Adding through a source returns a
+   * row at once and fills its cover/counts on the task thread; this is the
+   * nudge that says "read the shelf again", rather than each view polling.
+   */
+  settleCount: number;
 }
 
 /** The shelf: every series in the library, and the way to add another. */
@@ -59,6 +65,7 @@ export function LibraryView({
   onOpenSeries,
   onOpenFolder,
   onError,
+  settleCount,
 }: LibraryViewProps) {
   const t = useT();
   const [root, setRoot] = useState<string | null>(null);
@@ -114,6 +121,17 @@ export function LibraryView({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // A task finishing means a row may have quietly filled in — the cover and
+  // chapter counts an add-through-source defers to the queue. Skipped on the
+  // mount pass, which `refresh` above already did.
+  const settled = useRef(settleCount);
+  useEffect(() => {
+    if (settled.current !== settleCount) {
+      settled.current = settleCount;
+      void refresh();
+    }
+  }, [settleCount, refresh]);
 
   const relocate = useCallback(async () => {
     const picked = await openDialog({ directory: true, multiple: false });

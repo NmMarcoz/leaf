@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
+  BookPlus,
   Check,
   Download,
   Loader2,
@@ -99,6 +100,8 @@ function Row({ task }: { task: Task }) {
           <X className="size-4 text-muted-foreground" />
         ) : task.kind === "build" ? (
           <PackageCheck className="size-4 text-muted-foreground" />
+        ) : task.kind === "metadata" ? (
+          <BookPlus className="size-4 text-muted-foreground" />
         ) : (
           <Download className="size-4 text-muted-foreground" />
         )}
