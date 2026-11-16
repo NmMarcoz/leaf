@@ -7,6 +7,7 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   Send,
   Settings,
 } from "lucide-react";
@@ -19,7 +20,7 @@ import { canSendToDevice } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 /** Top-level destinations. A series or the editor both live under the library. */
-export type Section = "library" | "explore" | "history" | "send" | "settings";
+export type Section = "library" | "explore" | "history" | "send" | "extensions" | "settings";
 
 /**
  * Where the app's navigation sits.
@@ -63,6 +64,15 @@ function destinations(t: Translator): Destination[] {
     },
     { section: "settings", icon: <Settings className="size-4" />, label: t("sidebar.settings") },
   ];
+  // Extensions sit just above Settings: both are about the app itself rather
+  // than the collection, and the entry only earns its rail space once there
+  // is a folder that can hold something. (There always can — surveying an
+  // empty folder is free — so unlike Send, it is never filtered out.)
+  all.splice(all.length - 1, 0, {
+    section: "extensions",
+    icon: <Puzzle className="size-4" />,
+    label: t("sidebar.extensions"),
+  });
   return all.filter((d) => d.section !== "send" || canSendToDevice);
 }
 

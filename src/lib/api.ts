@@ -215,26 +215,36 @@ export interface SourceMangaDetails {
   cover_url: string | null;
 }
 
-/** A user extension that loads fine but sits at the trust gate, awaiting
- * approval. Mirrors `PendingInfo` / `DevInfo` (same shape, two queues). */
-export interface ExtensionInfo extends SourceInfo {
+/** Where one script stands with the trust gate. Mirrors `ScriptState`
+ * (kebab-case serde). */
+export type ScriptState = "approved" | "dev" | "pending" | "disabled" | "broken";
+
+/** One `.lua` file in the extensions folder, as the panel lists it. Mirrors
+ * `UserScript`. `info` is absent exactly when the script failed to load, in
+ * which case `error` explains why the row renders anyway. */
+export interface UserScript {
   file: string;
   fingerprint: string;
-}
-
-/** What the gate currently sees in the extensions folder. Mirrors
- * `ExtensionReview`: `pending` awaits a decision, `dev` runs unlocked until
- * the author locks it. */
-export interface ExtensionReview {
-  pending: ExtensionInfo[];
-  dev: ExtensionInfo[];
+  state: ScriptState;
+  id?: string;
+  name?: string;
+  lang?: string;
+  base_url?: string;
+  error: string;
 }
 
 /** Every registered source, for an Add-from-source or Explore picker. */
 export const listSources = () => invoke<SourceInfo[]>("list_sources");
 
-/** The extensions folder as the trust gate sees it. */
-export const reviewExtensions = () => invoke<ExtensionReview>("review_extensions");
+/** The extensions folder as one row per file, each with its gate state. */
+export const listExtensions = () => invoke<UserScript[]>("list_extensions");
+
+/** Copy a picked `.lua` file into the extensions folder (validating it
+ * loads first). `asName` renames on the way in — how Update replaces an
+ * existing entry. Returns the stored filename. Copying in does not enable:
+ * the new bytes still pass the gate as pending. */
+export const installExtension = (sourcePath: string, asName?: string) =>
+  invoke<string>("install_extension", { sourcePath, asName: asName ?? null });
 
 /** Approve one extension, by the fingerprint it was shown with. */
 export const approveExtension = (fingerprint: string) =>
@@ -243,6 +253,14 @@ export const approveExtension = (fingerprint: string) =>
 /** Put one extension file into (or out of) development mode. */
 export const setExtensionDev = (file: string, dev: boolean) =>
   invoke<void>("set_extension_dev", { file, dev });
+
+/** Switch an extension off or back on; off files are not loaded at all. */
+export const setExtensionEnabled = (file: string, enabled: boolean) =>
+  invoke<void>("set_extension_enabled", { file, enabled });
+
+/** Delete the script file and forget its name-keyed trust state. */
+export const removeExtension = (file: string) =>
+  invoke<void>("remove_extension", { file });
 
 /** Freeze a dev extension's current bytes as its approval. Returns the
  * fingerprint that was locked — computed by the backend from the file. */

@@ -21,6 +21,15 @@ export interface Settings {
   welcomed: boolean;
   /** The version this install last showed a "what's new" panel for. */
   last_seen_version: string | null;
+  /**
+   * Extension trust state. The frontend never edits these — the extension
+   * panel's commands do, backend-side — but `set_settings` overwrites the
+   * whole file with whatever it is handed, so the mirror must carry them for
+   * a Settings round-trip not to wipe them.
+   */
+  approved_extensions: string[];
+  dev_extensions: string[];
+  disabled_extensions: string[];
 }
 
 /** Mirrors `leaf_core::Compression`. */
