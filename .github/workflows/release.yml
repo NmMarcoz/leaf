@@ -206,9 +206,12 @@ jobs:
             # What's new first: it is what the update card in the app shows,
             # and on Android the card reads the release body itself.
             { cat .github/whats-new.md; echo; cat .github/release-notes.md; } > "$RUNNER_TEMP/body.md"
-            gh release create "$TAG" --draft --verify-tag \
-              --title "Leaf $TAG" --notes-file "$RUNNER_TEMP/body.md"
-            id=$(release_id)
+            # The id comes from the create response itself. Listing right
+            # after creating does not see the new draft yet — v1.1.0's first
+            # run made one and then reported it missing.
+            id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" -f name="Leaf $TAG" -F draft=true \
+              -F body=@"$RUNNER_TEMP/body.md" --jq .id)
           else
             echo "release for $TAG already exists ($id); reusing it"
           fi
