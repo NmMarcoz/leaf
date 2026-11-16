@@ -35,6 +35,9 @@ import { languageName } from "@/lib/api";
 import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
+/** The pan/reset pair a mounted page image lends to the keyboard handler. */
+type ZoomHandle = ReturnType<typeof useImageZoom>["handle"];
+
 interface ReaderViewProps {
   target: ReaderTarget;
   /** Move to another chapter without leaving the reader. */
@@ -60,6 +63,9 @@ const SAVE_DELAY = 600;
 
 /** Pixels a touch must travel across the page before it counts as a turn. */
 const SWIPE_MIN = 50;
+
+/** How far one arrow press scans a zoomed page. */
+const PAN_KEY_STEP = 120;
 
 /**
  * A chapter, flattened to the handful of things the reader draws.
@@ -371,6 +377,19 @@ export function ReaderView({
           advance(rtl ? 1 : -1);
           break;
         case "ArrowDown":
+          if (prefs.mode !== "webtoon") {
+            // While a page is zoomed beyond its box, arrows scan it rather
+            // than turn it: reading a zoomed page means looking at more of it.
+            if (zoomHandle.current?.panByPixels(0, -PAN_KEY_STEP)) {
+              event.preventDefault();
+              break;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              advance(1);
+            }
+          }
+          break;
         case " ":
           if (prefs.mode !== "webtoon") {
             event.preventDefault();
@@ -379,6 +398,10 @@ export function ReaderView({
           break;
         case "ArrowUp":
           if (prefs.mode !== "webtoon") {
+            if (zoomHandle.current?.panByPixels(0, PAN_KEY_STEP)) {
+              event.preventDefault();
+              break;
+            }
             event.preventDefault();
             advance(-1);
           }
@@ -422,6 +445,14 @@ export function ReaderView({
 
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  /**
+   * The zoom handle of whichever page image is currently mounted. In paged
+   * and double mode at most two images exist and only one can be zoomed, so
+   * "the last one registered" is always the one arrows should pan. Kept as a
+   * ref that PageImage clears on unmount (and re-claims when another mounts),
+   * so leaving the paged layouts can't leave the arrows panning a corpse.
+   */
+  const zoomHandle = useRef<ZoomHandle | null>(null);
   /** Where a mouse button went down. WebView synthesises no touch events from
    * a mouse, so without this a drag ends as a plain click at the release
    * point — which turns the page by *where the finger lifted*, the one thing
@@ -691,6 +722,7 @@ export function ReaderView({
               online={open.online}
               fit={prefs.fit}
               paired={prefs.mode === "double" && visible.length > 1}
+              handleRef={zoomHandle}
             />
           ))}
         </div>
@@ -766,11 +798,14 @@ function PageImage({
   online,
   fit,
   paired,
+  handleRef,
 }: {
   source: string;
   online: boolean;
   fit: FitMode;
   paired: boolean;
+  /** Claims this image's pan handle for the arrow keys while it is mounted. */
+  handleRef: React.MutableRefObject<ZoomHandle | null>;
 }) {
   const t = useT();
   const zoom = useImageZoom<HTMLImageElement>();
@@ -781,6 +816,17 @@ function PageImage({
   // three times wider than the screen — blurred, cropped to its middle, and
   // already below the zoom's floor, so it looks stuck zoomed in.
   const [nativeWidth, setNativeWidth] = useState<number | null>(null);
+
+  // The keyboard arrows pan whichever image is actually zoomed or panned,
+  // not merely mounted: in double mode both pages register otherwise, and
+  // the last one mounted would swallow arrows aimed at the first.
+  useEffect(() => {
+    if (!zoom.moved) return;
+    handleRef.current = zoom.handle;
+    return () => {
+      if (handleRef.current === zoom.handle) handleRef.current = null;
+    };
+  }, [zoom.moved, zoom.handle, handleRef]);
 
   useEffect(() => {
     const hit = cachedPage(source, online);

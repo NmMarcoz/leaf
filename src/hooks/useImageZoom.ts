@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MAX_SCALE = 4;
 
@@ -93,6 +93,9 @@ export function useImageZoom<T extends HTMLElement>() {
   const [zoom, setZoom] = useState<Zoom>(IDLE);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  // Filled by the effect below so the returned pan method is stable across
+  // renders while still seeing the live node and clamp maths.
+  const panApi = useRef<((dx: number, dy: number) => boolean) | null>(null);
 
   useEffect(() => {
     if (!node) return;
@@ -126,6 +129,13 @@ export function useImageZoom<T extends HTMLElement>() {
     const panBy = (dx: number, dy: number) => {
       const current = zoomRef.current;
       apply(clampZoom({ scale: current.scale, x: current.x + dx, y: current.y + dy }, node));
+    };
+
+    panApi.current = (dx, dy) => {
+      const before = zoomRef.current;
+      panBy(dx, dy);
+      const after = zoomRef.current;
+      return after.x !== before.x || after.y !== before.y;
     };
 
     /** Whether there is anything off-screen for a drag to bring into view. */
@@ -329,13 +339,29 @@ export function useImageZoom<T extends HTMLElement>() {
   const zoomed = zoom.scale !== 1;
   // An original-size page pans at scale 1, so a transform is not only a zoom.
   const moved = zoomed || zoom.x !== 0 || zoom.y !== 0;
+  const panByPixels = useCallback(
+    /**
+     * Nudges the pan, returning whether anything actually moved — the
+     * reader's arrow keys turn pages when it says no and scan the zoomed
+     * page when it says yes, without either side knowing the other exists.
+     */
+    (dx: number, dy: number) => panApi.current?.(dx, dy) ?? false,
+    [],
+  );
+  const reset = useCallback(() => {
+    zoomRef.current = IDLE;
+    setZoom(IDLE);
+  }, []);
+  // Stable identity so a page can register its handle once and be forgotten
+  // once, rather than every render re-registering through a fresh object.
+  const handle = useMemo(() => ({ panByPixels, reset }), [panByPixels, reset]);
   return {
     ref: setNode,
     zoomed,
+    moved,
     style: moved ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined,
-    reset: () => {
-      zoomRef.current = IDLE;
-      setZoom(IDLE);
-    },
+    panByPixels,
+    reset,
+    handle,
   };
 }
