@@ -2,6 +2,22 @@ import { useEffect, useRef, useState } from "react";
 
 const MAX_SCALE = 4;
 
+/** The zoom a middle-click or double-click jumps straight to. */
+const INSTANT_SCALE = 2.5;
+
+/** One mouse notch reports a deltaY around this; bigger is clipped to it. */
+const WHEEL_NOTCH = 100;
+
+/**
+ * Per unit of wheel delta. 0.01 made a single notch a 2.7x jump — the gesture
+ * reads as progressive only when a notch is ~22%, which is also roughly how
+ * far the eye wants to re-read a panel.
+ */
+const WHEEL_STEP = 0.002;
+
+/** A "double-click" whose two presses drifted further than this was a drag. */
+const DBLCLICK_TOLERANCE = 12;
+
 interface Zoom {
   scale: number;
   x: number;
@@ -129,7 +145,54 @@ export function useImageZoom<T extends HTMLElement>() {
       // pinch reports as.
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      zoomAt(Math.exp(-event.deltaY * 0.01), event.clientX, event.clientY);
+      // A mouse notch reports ~100 delta units in one event while a trackpad
+      // streams dozens of tiny ones; clipping the notch (and taking the
+      // dominant axis, which is what horizontal trackpad scroll reports) puts
+      // both on the same gentle curve rather than the notch jumping 2.7x.
+      const raw = event.deltaY === 0 ? event.deltaX : event.deltaY;
+      const delta = Math.max(-WHEEL_NOTCH, Math.min(WHEEL_NOTCH, raw));
+      zoomAt(Math.exp(-delta * WHEEL_STEP), event.clientX, event.clientY);
+    };
+
+    /**
+     * The one-jump zoom: middle-click, or a double-click that stayed put.
+     *
+     * Double-click works without delaying any single click because the
+     * reader's middle third toggles chrome rather than turning pages — two
+     * clicks there are a net no-op — and the edge thirds turning twice for a
+     * hurried double-click is cheaper than taxing every tap with a click
+     * timeout. The browser fires the two clicks first, then this.
+     */
+    const toggleInstant = (clientX: number, clientY: number) => {
+      if (zoomRef.current.scale !== 1) {
+        apply(IDLE);
+        return;
+      }
+      zoomAt(INSTANT_SCALE, clientX, clientY);
+    };
+
+    let downAt: { x: number; y: number } | null = null;
+
+    const onAuxClick = (event: MouseEvent) => {
+      // Middle button. preventDefault suppresses Chromium's autoscroll
+      // ping-pong cursor; stopPropagation keeps the reader's click zones from
+      // treating it as anything.
+      if (event.button !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleInstant(event.clientX, event.clientY);
+    };
+
+    const onDoubleClick = (event: MouseEvent) => {
+      event.stopPropagation();
+      if (
+        downAt &&
+        Math.hypot(event.clientX - downAt.x, event.clientY - downAt.y) >
+          DBLCLICK_TOLERANCE
+      ) {
+        return; // a shakey double-drag was a pan attempt, not a zoom request
+      }
+      toggleInstant(event.clientX, event.clientY);
     };
 
     // Mouse panning, once there is something to pan to. A plain click at
@@ -150,6 +213,7 @@ export function useImageZoom<T extends HTMLElement>() {
       window.removeEventListener("mouseup", onMouseUp);
     };
     const onMouseDown = (event: MouseEvent) => {
+      downAt = { x: event.clientX, y: event.clientY };
       if (!pannable()) return;
       event.preventDefault();
       mouseFrom = { x: event.clientX, y: event.clientY };
@@ -241,6 +305,8 @@ export function useImageZoom<T extends HTMLElement>() {
     node.addEventListener("wheel", onWheel, { passive: false });
     node.addEventListener("mousedown", onMouseDown);
     node.addEventListener("click", onClick);
+    node.addEventListener("auxclick", onAuxClick);
+    node.addEventListener("dblclick", onDoubleClick);
     node.addEventListener("touchstart", onTouchStart, { passive: true });
     node.addEventListener("touchmove", onTouchMove, { passive: false });
     node.addEventListener("touchend", onTouchEnd, { passive: false });
@@ -249,6 +315,8 @@ export function useImageZoom<T extends HTMLElement>() {
       node.removeEventListener("wheel", onWheel);
       node.removeEventListener("mousedown", onMouseDown);
       node.removeEventListener("click", onClick);
+      node.removeEventListener("auxclick", onAuxClick);
+      node.removeEventListener("dblclick", onDoubleClick);
       node.removeEventListener("touchstart", onTouchStart);
       node.removeEventListener("touchmove", onTouchMove);
       node.removeEventListener("touchend", onTouchEnd);
