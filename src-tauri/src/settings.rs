@@ -111,6 +111,12 @@ pub struct Settings {
     /// only thing that runs it.
     #[serde(default)]
     pub dev_extensions: Vec<String>,
+    /// Extension files the user switched off: listed by the panel, never
+    /// loaded. Keyed by filename like dev mode — deactivating is a statement
+    /// about the entry in the list, and reactivating should find the file
+    /// wherever the author left it.
+    #[serde(default)]
+    pub disabled_extensions: Vec<String>,
 }
 
 /// The on-disk shape. Every field optional so an older file still loads.
@@ -129,6 +135,7 @@ struct Stored {
     last_seen_version: Option<String>,
     approved_extensions: Option<Vec<String>>,
     dev_extensions: Option<Vec<String>>,
+    disabled_extensions: Option<Vec<String>>,
 }
 
 pub fn load(app: &AppHandle) -> Result<Settings> {
@@ -168,6 +175,7 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
         last_seen_version: stored.last_seen_version,
         approved_extensions: stored.approved_extensions.unwrap_or_default(),
         dev_extensions: stored.dev_extensions.unwrap_or_default(),
+        disabled_extensions: stored.disabled_extensions.unwrap_or_default(),
     })
 }
 
@@ -189,6 +197,7 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
             last_seen_version: next.last_seen_version.clone(),
             approved_extensions: Some(next.approved_extensions.clone()),
             dev_extensions: Some(next.dev_extensions.clone()),
+            disabled_extensions: Some(next.disabled_extensions.clone()),
         },
     )
 }

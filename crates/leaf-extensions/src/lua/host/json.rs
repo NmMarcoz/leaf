@@ -63,12 +63,7 @@ fn lua_to_json(value: &Value) -> mlua::Result<Json> {
         Value::String(s) => Json::String(s.to_str()?.to_string()),
         Value::Table(table) => {
             let len = table.raw_len();
-            let is_array = len > 0
-                && table
-                    .clone()
-                    .pairs::<Value, Value>()
-                    .count()
-                    == len;
+            let is_array = len > 0 && table.clone().pairs::<Value, Value>().count() == len;
             if is_array {
                 let mut items = Vec::with_capacity(len);
                 for i in 1..=len {
