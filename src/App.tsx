@@ -23,6 +23,7 @@ import { HistoryView } from "@/views/HistoryView";
 import { ReaderView } from "@/views/ReaderView";
 import type { ReaderTarget } from "@/lib/reader";
 import { SendView } from "@/views/SendView";
+import { ExtensionsView } from "@/views/ExtensionsView";
 import { SettingsView } from "@/views/SettingsView";
 import { WelcomeView } from "@/views/WelcomeView";
 import { useUpdater } from "@/hooks/useUpdater";
@@ -48,6 +49,7 @@ type View =
   // from — the series page, history, or the middle of a browse.
   | { kind: "reader"; target: ReaderTarget; back: View }
   | { kind: "send" }
+  | { kind: "extensions" }
   | { kind: "settings" }
   | { kind: "editor"; from: { seriesId: number; number: string } | null };
 
@@ -308,6 +310,10 @@ export default function App() {
       return <SendView onSaved={() => {}} onError={setError} />;
     }
 
+    if (view.kind === "extensions") {
+      return <ExtensionsView onError={setError} />;
+    }
+
     if (view.kind === "settings") {
       return (
         <SettingsView
@@ -414,6 +420,7 @@ export default function App() {
   const section: Section =
     view.kind === "settings" ||
     view.kind === "send" ||
+    view.kind === "extensions" ||
     view.kind === "explore" ||
     view.kind === "history"
       ? view.kind
