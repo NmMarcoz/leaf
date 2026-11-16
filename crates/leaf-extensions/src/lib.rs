@@ -32,7 +32,7 @@ pub mod net_guard;
 pub mod registry;
 pub mod types;
 
-pub use registry::{PendingExtension, Registry};
+pub use registry::{Governance, PendingExtension, Registry, ScriptState, UserScript};
 pub use types::{
     ChapterRef, MangaDetails, MangaSummary, MangasPage, Source, SourceInfo, VolumeChapters,
     VolumeCover,

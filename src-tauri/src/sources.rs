@@ -8,7 +8,7 @@
 //! `.lua` files is cheap next to the SQLite/HTTP work each command already does.
 
 use anyhow::{anyhow, Result};
-use leaf_extensions::{MangaDetails, MangasPage, Registry, Source as _, SourceInfo};
+use leaf_extensions::{MangaDetails, MangasPage, Registry, SourceInfo, UserScript};
 use leaf_library::model::{NewSeries, PublishedChapter, PublishedVolume};
 use leaf_library::{Library, Series, SeriesId};
 use leaf_meta::VolumeChapters;
@@ -33,94 +33,148 @@ pub fn load_registry(app: &AppHandle) -> Result<Registry> {
     let root = settings::library_root(app)?;
     let settings = settings::load(app)?;
     let mut registry = Registry::load_builtin();
-    let (_failures, _pending) = registry.load_governed_extensions(
-        &root.join("extensions"),
-        &settings.approved_extensions,
-        &settings.dev_extensions,
-    );
+    let governance = governance(&settings);
+    let (_failures, _pending) =
+        registry.load_governed_extensions(&root.join("extensions"), &governance);
     Ok(registry)
 }
 
-/// The extension folder as the gate sees it: what is waiting for approval,
-/// and what the user marked as in development (registered, no byte lock —
-/// ready to lock when it is finished).
-#[derive(serde::Serialize)]
-pub struct ExtensionReview {
-    pub pending: Vec<PendingInfo>,
-    pub dev: Vec<DevInfo>,
+/// The three trust lists as the registry wants them.
+fn governance(s: &settings::Settings) -> leaf_extensions::Governance<'_> {
+    leaf_extensions::Governance {
+        approved: &s.approved_extensions,
+        dev_files: &s.dev_extensions,
+        disabled: &s.disabled_extensions,
+    }
 }
 
-/// One extension the user is developing: current facts, so the panel can
-/// show what locking would freeze.
-#[derive(serde::Serialize)]
-pub struct DevInfo {
-    pub file: String,
-    pub fingerprint: String,
-    #[serde(flatten)]
-    pub info: SourceInfo,
-}
-
-/// What `load_registry` left at the gate: every extension file that loads
-/// successfully but is neither approved nor in development, with the facts
-/// the user needs to decide (name, id, base_url, fingerprint).
+/// Every `.lua` file in the extensions folder, with its state against the
+/// gate — the list the Extensions panel renders. Unlike `load_registry` this
+/// builds no source anyone will use; it answers "what is in there, and what
+/// do I need to do about it?".
 #[tauri::command]
-pub async fn review_extensions(app: AppHandle) -> Result<ExtensionReview, String> {
+pub async fn list_extensions(app: AppHandle) -> Result<Vec<UserScript>, String> {
     blocking(move || {
         let root = settings::library_root(&app)?;
         let settings = settings::load(&app)?;
-        let mut registry = Registry::load_builtin();
-        let (_failures, pending) = registry.load_governed_extensions(
+        Ok(Registry::survey(
             &root.join("extensions"),
-            &settings.approved_extensions,
-            &settings.dev_extensions,
-        );
-
-        // Dev files are registered, so they never appear in `pending` — read
-        // the same folder again for the ones that are, matching by name.
-        let dev_dir = root.join("extensions");
-        let mut dev = Vec::new();
-        for name in &settings.dev_extensions {
-            let path = dev_dir.join(name);
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue; // Deleted since it was flagged dev.
-            };
-            let fingerprint = Registry::fingerprint(&text);
-            if let Ok(source) = leaf_extensions::lua::LuaSource::load(text) {
-                dev.push(DevInfo {
-                    file: name.clone(),
-                    fingerprint,
-                    info: source.info().clone(),
-                });
-            }
-        }
-
-        Ok(ExtensionReview {
-            pending: pending
-                .into_iter()
-                .map(|p| PendingInfo {
-                    file: p
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    fingerprint: p.fingerprint,
-                    info: p.info,
-                })
-                .collect(),
-            dev,
-        })
+            &governance(&settings),
+        ))
     })
     .await
 }
 
-/// One pending extension as the frontend sees it — `PendingExtension` minus
-/// the path, which is the user's filesystem and has no business crossing IPC.
-#[derive(serde::Serialize)]
-pub struct PendingInfo {
-    pub file: String,
-    pub fingerprint: String,
-    #[serde(flatten)]
-    pub info: SourceInfo,
+/// Validate a name the UI supplied for something inside the extensions
+/// folder. The folder is the user's and the name came over IPC, so nothing
+/// may escape it or name a non-script.
+fn extension_name(file: &str) -> Result<(), anyhow::Error> {
+    let path = std::path::Path::new(file);
+    let plain = path.file_name().map(|n| n == std::ffi::OsStr::new(file)) == Some(true);
+    if !plain || path.extension().and_then(|e| e.to_str()) != Some("lua") {
+        return Err(anyhow!("{file:?} is not an extension file"));
+    }
+    Ok(())
+}
+
+/// Copy a script the user picked (from the file dialog, so a real path
+/// anywhere) into the extensions folder.
+///
+/// `as_name` renames on the way in — how "Update" overwrites an existing
+/// entry with a newer file the author sent under some download name. With
+/// `None` the file keeps its own name.
+///
+/// Copying in does not enable: the new bytes are unapproved, so the row
+/// lands as pending (or stays dev if that file was already in dev — its
+/// next save is this save). No path from a dialog click to code running
+/// without the gate having said something first.
+#[tauri::command]
+pub async fn install_extension(
+    app: AppHandle,
+    source_path: String,
+    as_name: Option<String>,
+) -> Result<String, String> {
+    blocking(move || {
+        let source = std::path::Path::new(&source_path);
+        if source.extension().and_then(|e| e.to_str()) != Some("lua") {
+            return Err(anyhow!("choose a .lua file"));
+        }
+        // Read through the registry's own loader before saving: a file that
+        // will not parse is rejected here rather than landing in the folder
+        // as another broken row.
+        let text = std::fs::read_to_string(source)
+            .map_err(|e| anyhow!("reading {}: {e}", source.display()))?;
+        leaf_extensions::lua::LuaSource::load(text.clone())
+            .map_err(|e| anyhow!("that file is not a working extension: {e:#}"))?;
+
+        let name = match &as_name {
+            Some(name) => {
+                extension_name(name)?;
+                name.clone()
+            }
+            None => source
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .ok_or_else(|| anyhow!("picked file has no name"))?,
+        };
+
+        let root = settings::library_root(&app)?;
+        let dest_dir = root.join("extensions");
+        std::fs::create_dir_all(&dest_dir)?;
+        std::fs::write(dest_dir.join(&name), text).map_err(|e| anyhow!("writing {name}: {e}"))?;
+        Ok(name)
+    })
+    .await
+}
+
+/// Switch an extension off (or back on). Off files are skipped before
+/// loading: no VM, no pending nag, no source in any picker.
+#[tauri::command]
+pub async fn set_extension_enabled(
+    app: AppHandle,
+    file: String,
+    enabled: bool,
+) -> Result<(), String> {
+    blocking(move || {
+        extension_name(&file)?;
+        let mut settings = settings::load(&app)?;
+        let named = settings.disabled_extensions.iter().any(|f| f == &file);
+        if enabled && named {
+            settings.disabled_extensions.retain(|f| f != &file);
+        } else if !enabled && !named {
+            settings.disabled_extensions.push(file);
+        } else {
+            return Ok(());
+        }
+        settings::save(&app, &settings)
+    })
+    .await
+}
+
+/// Delete the script file and forget every trust claim about it.
+///
+/// Fingerprints stay: they are content hashes, and an identical copy of an
+/// approved script elsewhere should not need re-approving for the deletion
+/// of one copy. The name-keyed lists must go, though — a new file reusing
+/// the name of a removed extension must not inherit its dev mode or read
+/// "disabled" with no visible row to re-enable.
+#[tauri::command]
+pub async fn remove_extension(app: AppHandle, file: String) -> Result<(), String> {
+    blocking(move || {
+        extension_name(&file)?;
+        let root = settings::library_root(&app)?;
+        let path = root.join("extensions").join(&file);
+        // `remove_file` on a path that was validated to be a plain name
+        // inside the extensions folder; never recursive, never a directory.
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| anyhow!("removing {file}: {e}"))?;
+        }
+        let mut settings = settings::load(&app)?;
+        settings.dev_extensions.retain(|f| f != &file);
+        settings.disabled_extensions.retain(|f| f != &file);
+        settings::save(&app, &settings)
+    })
+    .await
 }
 
 /// Approve one extension by fingerprint. Approval is content-addressed: a

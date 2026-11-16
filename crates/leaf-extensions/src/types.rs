@@ -86,10 +86,12 @@ impl MangaDetails {
     /// catalogue listing this series was picked from — is the search query
     /// when the source's own call didn't get far enough to supply one itself.
     pub fn best_effort(source: &dyn Source, external_id: &str, fallback_title: &str) -> Self {
-        let mut details = source.manga_details(external_id).unwrap_or_else(|_| MangaDetails {
-            title: fallback_title.to_string(),
-            ..Default::default()
-        });
+        let mut details = source
+            .manga_details(external_id)
+            .unwrap_or_else(|_| MangaDetails {
+                title: fallback_title.to_string(),
+                ..Default::default()
+            });
         if details.title.is_empty() {
             details.title = fallback_title.to_string();
         }

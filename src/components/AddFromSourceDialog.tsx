@@ -24,14 +24,14 @@ import {
 import { useT } from "@/lib/i18n";
 import {
   approveExtension,
+  listExtensions,
   listSources,
   lockExtension,
-  reviewExtensions,
   searchSource,
   setExtensionDev,
-  type ExtensionInfo,
   type SourceInfo,
   type SourceManga,
+  type UserScript,
 } from "@/lib/api";
 import { addSeriesFromSource, type Series } from "@/lib/library";
 import { cn } from "@/lib/utils";
@@ -55,8 +55,8 @@ interface AddFromSourceDialogProps {
 export function AddFromSourceDialog({ open, onOpenChange, onAdded }: AddFromSourceDialogProps) {
   const t = useT();
   const [sources, setSources] = useState<SourceInfo[] | null>(null);
-  const [pending, setPending] = useState<ExtensionInfo[]>([]);
-  const [dev, setDev] = useState<ExtensionInfo[]>([]);
+  const [pending, setPending] = useState<UserScript[]>([]);
+  const [dev, setDev] = useState<UserScript[]>([]);
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SourceManga[] | null>(null);
@@ -87,9 +87,9 @@ export function AddFromSourceDialog({ open, onOpenChange, onAdded }: AddFromSour
 
   const refreshGate = useCallback(async () => {
     try {
-      const review = await reviewExtensions();
-      setPending(review.pending);
-      setDev(review.dev);
+      const found = await listExtensions();
+      setPending(found.filter((e) => e.state === "pending"));
+      setDev(found.filter((e) => e.state === "dev"));
     } catch {
       setPending([]);
       setDev([]);
