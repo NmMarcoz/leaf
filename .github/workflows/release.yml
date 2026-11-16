@@ -183,11 +183,16 @@ jobs:
           - platform: windows-latest
             args: ""
             rust-targets: ""
-          # Linux would go here:
-          #   - platform: ubuntu-22.04
-          #     args: ""
-          # It needs the same apt step the `check` job runs, plus `patchelf`,
-          # which only the AppImage bundler uses.
+          # One Linux build covers every distribution: `targets: "all"` bundles
+          # .deb (Debian/Ubuntu/Mint), .rpm (Fedora/openSUSE/RHEL) and the
+          # AppImage (everything else, including Arch). Built on 22.04 rather
+          # than the newer runners because Tauri's docs want the oldest glibc
+          # you intend to support — a binary linked against 2.35 runs on every
+          # distro since, one linked against 2.39 breaks the older ones. The
+          # .rpm needs rpmbuild, hence rpm-build in the apt step.
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
 
     runs-on: ${{ matrix.platform }}
 
@@ -210,6 +215,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-targets }}
+
+      # Same stack the `check` job installs so the webview links, plus what the
+      # Linux bundlers alone need: rpm-build for the .rpm (rpmbuild is NOT on
+      # Debian runners by default) and patchelf for the AppImage.
+      - name: Linux bundler dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            rpm-build
 
       # Tauri's dependency tree is large; without this every release build
       # compiles it from scratch on both runners.
@@ -257,6 +278,10 @@ jobs:
             - **macOS** — `.dmg`. Unsigned for now, so the first launch needs
               right-click → Open. Updates afterwards are automatic.
             - **Windows** — `.exe` for a normal install, `.msi` if you prefer it.
+            - **Linux** — `.deb` for Debian/Ubuntu/Mint, `.rpm` for
+              Fedora/openSUSE, and the `.AppImage` for everything else
+              (Arch gets it through the AUR build or the AppImage directly).
+              The in-app updater covers Linux too, via the `.tar.gz`.
             - **Android** — `.apk`, arm64. Sideload it; there is no store
               listing, so the phone will ask you to allow installing from this
               source. Reading and downloading work; building a volume writes it
@@ -288,6 +313,9 @@ jobs:
             target/**/release/bundle/dmg/*.dmg
             target/**/release/bundle/msi/*.msi
             target/**/release/bundle/nsis/*.exe
+            target/**/release/bundle/deb/*.deb
+            target/**/release/bundle/rpm/*.rpm
+            target/**/release/bundle/appimage/*.AppImage
 
   # Android is a separate job rather than another entry in the build matrix:
   # tauri-action knows nothing about APKs, the signing is ours, and the runner
