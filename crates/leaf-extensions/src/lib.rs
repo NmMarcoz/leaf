@@ -28,10 +28,11 @@
 
 pub mod lua;
 pub mod native;
+pub mod net_guard;
 pub mod registry;
 pub mod types;
 
-pub use registry::Registry;
+pub use registry::{PendingExtension, Registry};
 pub use types::{
     ChapterRef, MangaDetails, MangaSummary, MangasPage, Source, SourceInfo, VolumeChapters,
     VolumeCover,

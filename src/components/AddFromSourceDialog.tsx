@@ -22,7 +22,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useT } from "@/lib/i18n";
-import { listSources, searchSource, type SourceInfo, type SourceManga } from "@/lib/api";
+import {
+  approveExtension,
+  listSources,
+  lockExtension,
+  reviewExtensions,
+  searchSource,
+  setExtensionDev,
+  type ExtensionInfo,
+  type SourceInfo,
+  type SourceManga,
+} from "@/lib/api";
 import { addSeriesFromSource, type Series } from "@/lib/library";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +55,8 @@ interface AddFromSourceDialogProps {
 export function AddFromSourceDialog({ open, onOpenChange, onAdded }: AddFromSourceDialogProps) {
   const t = useT();
   const [sources, setSources] = useState<SourceInfo[] | null>(null);
+  const [pending, setPending] = useState<ExtensionInfo[]>([]);
+  const [dev, setDev] = useState<ExtensionInfo[]>([]);
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SourceManga[] | null>(null);
@@ -65,7 +77,65 @@ export function AddFromSourceDialog({ open, onOpenChange, onAdded }: AddFromSour
         setSourceId((current) => current ?? found[0]?.id ?? null);
       })
       .catch((e) => setError(String(e)));
+    // The trust gate's queues live in this dialog because the dialog is
+    // where a source gets *used*, and so where "why isn't the extension I
+    // just dropped in the folder here?" gets asked. Failures are ignored on
+    // purpose: pending extensions are an opportunity to review, never a
+    // precondition for searching the sources that are already approved.
+    void refreshGate();
   }, [open]);
+
+  const refreshGate = useCallback(async () => {
+    try {
+      const review = await reviewExtensions();
+      setPending(review.pending);
+      setDev(review.dev);
+    } catch {
+      setPending([]);
+      setDev([]);
+    }
+  }, []);
+
+  const reloadSources = useCallback(async () => {
+    const [found] = await Promise.all([listSources(), refreshGate()]);
+    setSources(found);
+  }, [refreshGate]);
+
+  const approve = useCallback(
+    async (fingerprint: string) => {
+      try {
+        await approveExtension(fingerprint);
+        await reloadSources();
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [reloadSources],
+  );
+
+  const markDev = useCallback(
+    async (file: string, dev: boolean) => {
+      try {
+        await setExtensionDev(file, dev);
+        await reloadSources();
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [reloadSources],
+  );
+
+  const lock = useCallback(
+    async (file: string) => {
+      try {
+        await lockExtension(file);
+        await reloadSources();
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [reloadSources],
+  );
 
   const runSearch = useCallback(async () => {
     if (!sourceId || !query.trim()) return;
@@ -108,6 +178,70 @@ export function AddFromSourceDialog({ open, onOpenChange, onAdded }: AddFromSour
         </DialogHeader>
 
         <DialogBody>
+          {(pending.length > 0 || dev.length > 0) && (
+            <Callout tone="warning">
+              <div className="flex flex-col gap-2">
+                {pending.length > 0 && (
+                  <>
+                    <p className="text-xs">
+                      {t("addFromSourceDialog.pendingTitle", { count: pending.length })}
+                    </p>
+                    {pending.map((p) => (
+                      <div key={p.fingerprint} className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium">
+                            {p.name} <span className="text-muted-foreground">({p.file})</span>
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground" dir="ltr">
+                            {p.base_url}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void markDev(p.file, true)}
+                        >
+                          {t("addFromSourceDialog.develop")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void approve(p.fingerprint)}
+                        >
+                          {t("addFromSourceDialog.approve")}
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {dev.length > 0 && (
+                  <>
+                    <p className="text-xs">
+                      {t("addFromSourceDialog.devTitle", { count: dev.length })}
+                    </p>
+                    {dev.map((p) => (
+                      <div key={p.file} className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium">
+                            {p.name} <span className="text-muted-foreground">({p.file})</span>
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground" dir="ltr">
+                            {p.base_url}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="ghost" onClick={() => void markDev(p.file, false)}>
+                          {t("addFromSourceDialog.stopDeveloping")}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => void lock(p.file)}>
+                          {t("addFromSourceDialog.lock")}
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </Callout>
+          )}
           {sources !== null && sources.length === 0 ? (
             <Callout tone="info">
               {(() => {

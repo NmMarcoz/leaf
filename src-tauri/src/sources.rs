@@ -8,7 +8,7 @@
 //! `.lua` files is cheap next to the SQLite/HTTP work each command already does.
 
 use anyhow::{anyhow, Result};
-use leaf_extensions::{MangaDetails, MangasPage, Registry, SourceInfo};
+use leaf_extensions::{MangaDetails, MangasPage, Registry, Source as _, SourceInfo};
 use leaf_library::model::{NewSeries, PublishedChapter, PublishedVolume};
 use leaf_library::{Library, Series, SeriesId};
 use leaf_meta::VolumeChapters;
@@ -17,17 +17,177 @@ use tauri::AppHandle;
 use crate::settings;
 use crate::util::blocking;
 
-/// Built-in sources plus every `.lua` file under `<library>/extensions/` —
-/// the same folder the CLI reads, so either front end can point a user's
-/// script at one place. A script that fails to load is silently skipped: one
-/// broken extension must not make every other source command unusable, and
-/// there is no user-facing surface here yet to show a per-script warning on
-/// (unlike the CLI's stderr).
+/// Built-in sources plus every **approved** `.lua` file under
+/// `<library>/extensions/` — the same folder the CLI reads, so either front
+/// end can point a user's script at one place. A script that fails to load is
+/// silently skipped: one broken extension must not make every other source
+/// command unusable, and there is no user-facing surface here yet to show a
+/// per-script warning on (unlike the CLI's stderr).
+///
+/// An extension that loads fine but whose fingerprint is not in settings is
+/// *pending*, not registered — see `pending_extensions` / `approve_extension`.
+/// Loading a stranger's Lua gives their code an HTTP client on the user's
+/// network; the net guard bounds where it can reach, and the gate lets the
+/// user notice *what* they are turning on before they do.
 pub fn load_registry(app: &AppHandle) -> Result<Registry> {
     let root = settings::library_root(app)?;
+    let settings = settings::load(app)?;
     let mut registry = Registry::load_builtin();
-    registry.load_user_extensions(&root.join("extensions"));
+    let (_failures, _pending) = registry.load_governed_extensions(
+        &root.join("extensions"),
+        &settings.approved_extensions,
+        &settings.dev_extensions,
+    );
     Ok(registry)
+}
+
+/// The extension folder as the gate sees it: what is waiting for approval,
+/// and what the user marked as in development (registered, no byte lock —
+/// ready to lock when it is finished).
+#[derive(serde::Serialize)]
+pub struct ExtensionReview {
+    pub pending: Vec<PendingInfo>,
+    pub dev: Vec<DevInfo>,
+}
+
+/// One extension the user is developing: current facts, so the panel can
+/// show what locking would freeze.
+#[derive(serde::Serialize)]
+pub struct DevInfo {
+    pub file: String,
+    pub fingerprint: String,
+    #[serde(flatten)]
+    pub info: SourceInfo,
+}
+
+/// What `load_registry` left at the gate: every extension file that loads
+/// successfully but is neither approved nor in development, with the facts
+/// the user needs to decide (name, id, base_url, fingerprint).
+#[tauri::command]
+pub async fn review_extensions(app: AppHandle) -> Result<ExtensionReview, String> {
+    blocking(move || {
+        let root = settings::library_root(&app)?;
+        let settings = settings::load(&app)?;
+        let mut registry = Registry::load_builtin();
+        let (_failures, pending) = registry.load_governed_extensions(
+            &root.join("extensions"),
+            &settings.approved_extensions,
+            &settings.dev_extensions,
+        );
+
+        // Dev files are registered, so they never appear in `pending` — read
+        // the same folder again for the ones that are, matching by name.
+        let dev_dir = root.join("extensions");
+        let mut dev = Vec::new();
+        for name in &settings.dev_extensions {
+            let path = dev_dir.join(name);
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue; // Deleted since it was flagged dev.
+            };
+            let fingerprint = Registry::fingerprint(&text);
+            if let Ok(source) = leaf_extensions::lua::LuaSource::load(text) {
+                dev.push(DevInfo {
+                    file: name.clone(),
+                    fingerprint,
+                    info: source.info().clone(),
+                });
+            }
+        }
+
+        Ok(ExtensionReview {
+            pending: pending
+                .into_iter()
+                .map(|p| PendingInfo {
+                    file: p
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    fingerprint: p.fingerprint,
+                    info: p.info,
+                })
+                .collect(),
+            dev,
+        })
+    })
+    .await
+}
+
+/// One pending extension as the frontend sees it — `PendingExtension` minus
+/// the path, which is the user's filesystem and has no business crossing IPC.
+#[derive(serde::Serialize)]
+pub struct PendingInfo {
+    pub file: String,
+    pub fingerprint: String,
+    #[serde(flatten)]
+    pub info: SourceInfo,
+}
+
+/// Approve one extension by fingerprint. Approval is content-addressed: a
+/// later edit changes the fingerprint and puts the script back in the pending
+/// list, which is the whole point of not keying it on the filename.
+#[tauri::command]
+pub async fn approve_extension(app: AppHandle, fingerprint: String) -> Result<(), String> {
+    blocking(move || {
+        let mut settings = settings::load(&app)?;
+        if !settings.approved_extensions.contains(&fingerprint) {
+            settings.approved_extensions.push(fingerprint);
+            settings::save(&app, &settings)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Put one extension file into development mode: registered whatever its
+/// bytes are, so saving the script takes effect without re-approval.
+#[tauri::command]
+pub async fn set_extension_dev(app: AppHandle, file: String, dev: bool) -> Result<(), String> {
+    blocking(move || {
+        let mut settings = settings::load(&app)?;
+        let named = settings.dev_extensions.iter().any(|f| f == &file);
+        if dev && !named {
+            settings.dev_extensions.push(file);
+        } else if !dev {
+            settings.dev_extensions.retain(|f| f != &file);
+        } else {
+            return Ok(());
+        }
+        settings::save(&app, &settings)
+    })
+    .await
+}
+
+/// Freeze a development extension: the file's current bytes become a real
+/// approval and it leaves the dev list — after this, edits re-gate.
+///
+/// The fingerprint is computed here from the file, not taken from the
+/// caller: the UI may only say *which file* to lock, never *what it
+/// contains*, or a stale panel could approve bytes its author never showed.
+#[tauri::command]
+pub async fn lock_extension(app: AppHandle, file: String) -> Result<String, String> {
+    blocking(move || {
+        let root = settings::library_root(&app)?;
+        let path = root.join("extensions").join(&file);
+        // Refuse anything that is not a plain `.lua` filename — the folder is
+        // the user's and `file` came over IPC.
+        let is_plain_name = std::path::Path::new(&file)
+            .file_name()
+            .map(|n| n == std::ffi::OsStr::new(&file))
+            == Some(true);
+        if !is_plain_name || path.extension().and_then(|e| e.to_str()) != Some("lua") {
+            return Err(anyhow!("{file:?} is not an extension file"));
+        }
+        let text = std::fs::read_to_string(&path)?;
+        let fingerprint = Registry::fingerprint(&text);
+        let mut settings = settings::load(&app)?;
+        if !settings.approved_extensions.contains(&fingerprint) {
+            settings.approved_extensions.push(fingerprint.clone());
+        }
+        settings.dev_extensions.retain(|f| f != &file);
+        settings::save(&app, &settings).map(|_| fingerprint)
+    })
+    .await
 }
 
 /// Every registered source, for an Add-from-source picker.
@@ -56,7 +216,11 @@ pub async fn search_source(
 
 /// A registered source's most-popular listing, for Explore.
 #[tauri::command]
-pub async fn popular_source(app: AppHandle, source: String, page: u32) -> Result<MangasPage, String> {
+pub async fn popular_source(
+    app: AppHandle,
+    source: String,
+    page: u32,
+) -> Result<MangasPage, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
         let source = registry
@@ -69,7 +233,11 @@ pub async fn popular_source(app: AppHandle, source: String, page: u32) -> Result
 
 /// A registered source's latest-updates listing, for Explore.
 #[tauri::command]
-pub async fn latest_source(app: AppHandle, source: String, page: u32) -> Result<MangasPage, String> {
+pub async fn latest_source(
+    app: AppHandle,
+    source: String,
+    page: u32,
+) -> Result<MangasPage, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
         let source = registry
@@ -158,7 +326,13 @@ pub async fn add_series_from_source(
 
         // Best effort from here, same as `library_add_series`: a series with
         // no layout yet is recoverable with Refresh, a failed add is not.
-        let _ = pull_layout(&mut library, added.id, ext_source.as_ref(), &external_id, &added.title);
+        let _ = pull_layout(
+            &mut library,
+            added.id,
+            ext_source.as_ref(),
+            &external_id,
+            &added.title,
+        );
         if let Some(url) = details.cover_url {
             if let Ok(bytes) = leaf_meta::download_image(&url) {
                 let _ = library.set_cover(added.id, &bytes);
@@ -189,7 +363,9 @@ pub(crate) fn pull_layout(
     let mut covers = source.covers(source_id)?;
 
     if published.len() == 1 && published[0].volume == leaf_library::UNSORTED {
-        if let Some((remapped, mangadex_covers)) = leaf_meta::mangadex::remap_onto_volumes(title, &published) {
+        if let Some((remapped, mangadex_covers)) =
+            leaf_meta::mangadex::remap_onto_volumes(title, &published)
+        {
             published = remapped;
             // The source's own gallery (if any) has no idea these volume
             // numbers exist, so MangaDex's own covers are the only ones that
