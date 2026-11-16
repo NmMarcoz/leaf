@@ -158,3 +158,39 @@
   0% { transform: translateX(-100%); }
   100% { transform: translateX(250%); }
 }
+
+/* Page turns. The new pages ride in from the leading edge — the right in a
+   left-to-right book, the left in a right-to-left one — and the outgoing
+   ghost slides off the far side under it. Keyframes exist in both directions
+   because the mapping from turn direction to screen direction happens in
+   ReaderView, where the reading direction is known. */
+@keyframes turn-in-from-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes turn-in-from-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes turn-out-to-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+@keyframes turn-out-to-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+.turn-in-from-right { animation: turn-in-from-right 180ms ease-out; }
+.turn-in-from-left { animation: turn-in-from-left 180ms ease-out; }
+.turn-out-to-left { animation: turn-out-to-left 180ms ease-out; }
+.turn-out-to-right { animation: turn-out-to-right 180ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-in-from-right,
+  .turn-in-from-left,
+  .turn-out-to-left,
+  .turn-out-to-right {
+    animation: none;
+  }
+}
