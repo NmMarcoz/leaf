@@ -334,14 +334,59 @@ export function ReaderView({
   const step = prefs.mode === "double" ? 2 : 1;
 
   /**
-   * A page turn, with the page index it left from.
+   * A page turn in flight, and where it is heading.
    *
-   * `id` increments per turn so a second one mid-flight restarts the
-   * animation via key instead of being swallowed as "class already applied".
-   * Only `advance()` sets it: the position slider, Home/End and chapter
-   * changes jump, and animating a jump would pretend they turned pages.
+   * The commit is deferred: while a turn runs, `page` still holds the old
+   * view — fully painted, never re-rastered — and the new view rides in over
+   * it as an overlay. `page` only moves at the end. That ordering is the
+   * whole point: animating the *old* page away (the first attempt) exposed
+   * the new one underneath before its image had painted, so every turn
+   * started with a flash of the incoming page interpolating into place.
+   *
+   * `id` increments per turn so a second one mid-flight remounts the overlay
+   * and restarts the animation instead of being swallowed. Only `advance()`
+   * sets it: the position slider, Home/End and chapter changes jump, and
+   * animating a jump would pretend they turned pages.
    */
-  const [turn, setTurn] = useState<{ from: number; forward: boolean; id: number } | null>(null);
+  const [turn, setTurn] = useState<{ to: number; forward: boolean; id: number } | null>(null);
+
+  // Reduced motion kills the keyframes, and a killed animation fires no
+  // animationend — the turn would only land via the safety timer, showing
+  // the new page faded-in 80ms late. Treated as "none" at the state level
+  // rather than by CSS alone.
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = (event: MediaQueryListEvent) => setReducedMotion(event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  // animationend is the normal commit; this timer is the safety net for the
+  // turn whose animation never reported — an overlay unmounted early by a
+  // mode switch, a tab that slept through the frame. The animation is 180ms,
+  // so 260 never fires while it is still legitimately running.
+  useEffect(() => {
+    if (!turn) return;
+    const timer = window.setTimeout(() => {
+      setPage(turn.to);
+      setTurn(null);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [turn]);
+
+  // A chapter (re)load lands on its own page; an in-flight turn from the
+  // previous one must not commit on top of it.
+  useEffect(() => setTurn(null), [open]);
+
+  /** Jump straight to a page — the slider, Home/End. Not a turn: no overlay,
+   * and any overlay still running is abandoned rather than committed. */
+  const jump = useCallback((at: number) => {
+    setTurn(null);
+    setPage(at);
+  }, []);
 
   /** The pair indices the given page starts a view with, in screen order. */
   const pagesAt = useCallback(
@@ -357,7 +402,11 @@ export function ReaderView({
   const advance = useCallback(
     (delta: number) => {
       if (!open) return;
-      const next = page + delta * step;
+      // During a turn the committed page is behind where reading already is:
+      // the new view is mid-animation on top. Fast taps must stack onto the
+      // turn in flight, not re-step from the page underneath it.
+      const here = turn ? turn.to : page;
+      const next = here + delta * step;
 
       if (next < 0) {
         if (open.previous) onNavigate(open.previous);
@@ -368,11 +417,12 @@ export function ReaderView({
         return;
       }
       // Zooming rides a transform on the image; letting it persist into a
-      // turn would slide a panned crop off-screen as the "old" page.
+      // turn would slide a panned crop across the screen as the new page.
       zoomHandle.current?.reset();
-      setPage(next);
-      if (prefs.mode !== "webtoon") {
-        setTurn((current) => ({ from: page, forward: delta > 0, id: (current?.id ?? 0) + 1 }));
+      if (prefs.mode !== "webtoon" && prefs.animation !== "none" && !reducedMotion) {
+        setTurn((current) => ({ to: next, forward: delta > 0, id: (current?.id ?? 0) + 1 }));
+      } else {
+        setPage(next);
       }
 
       if (prefs.mode === "webtoon") {
@@ -381,7 +431,7 @@ export function ReaderView({
           ?.scrollIntoView({ behavior: "auto", block: "start" });
       }
     },
-    [open, page, step, prefs.mode, onNavigate],
+    [open, page, turn, step, prefs.mode, prefs.animation, reducedMotion, onNavigate],
   );
 
   useEffect(() => {
@@ -435,11 +485,11 @@ export function ReaderView({
           break;
         case "Home":
           event.preventDefault();
-          setPage(0);
+          jump(0);
           break;
         case "End":
           event.preventDefault();
-          setPage(Math.max(0, total - 1));
+          jump(Math.max(0, total - 1));
           break;
       }
     };
@@ -558,14 +608,9 @@ export function ReaderView({
 
   const visible = useMemo(() => pagesAt(page), [pagesAt, page]);
 
-  // The outgoing view, frozen at the moment of the turn: same shape
-  // (pairing, order) as the page it left. Its images come from the decode
-  // cache — the chapter they belong to was just on screen — so a ghost never
-  // fetches and never flashes.
-  const ghost = useMemo(
-    () => (turn ? pagesAt(turn.from) : []),
-    [turn, pagesAt],
-  );
+  // The incoming view during a turn: the pages the overlay carries. The old
+  // view stays underneath, committed and painted, until the end commits.
+  const turning = useMemo(() => (turn ? pagesAt(turn.to) : []), [turn, pagesAt]);
 
   // Loading and failure both need the way out. Being unable to leave a screen
   // that will never finish is worse than the thing that went wrong.
@@ -759,31 +804,41 @@ export function ReaderView({
             />
           ))}
 
-          {turn && ghost.length > 0 && (
+          {turn && turning.length > 0 && prefs.animation !== "none" && (
             <div
-              // Keyed by turn id: a second turn mid-flight remounts the ghost
-              // and its exit animation starts over instead of carrying on.
-              // pointer-events-none and a dead handle ref: the ghost is the
-              // page leaving, not a page anyone reads or pans.
+              // Keyed by turn id: a second turn mid-flight remounts the
+              // overlay and the animation starts over instead of carrying
+              // on. The images cost nothing to rebuild — preloaded pages
+              // hit the decode cache synchronously on mount. pointer-
+              // events-none and a dead handle ref: this page is arriving,
+              // not yet being read or panned.
               key={turn.id}
               onAnimationEnd={(event) => {
-                if (event.target === event.currentTarget) setTurn(null);
+                // The wrapper's own animation, not the images' (which
+                // inherit none of it, but a nested transition would).
+                if (event.target !== event.currentTarget) return;
+                setPage(turn.to);
+                setTurn(null);
               }}
               className={cn(
-                "pointer-events-none absolute inset-0 z-10 flex items-center justify-center",
-                // Forward slides the old page out toward the trailing edge
-                // — left in a left-to-right book, right in a right-to-left
-                // one — revealing the new page underneath it.
-                turn.forward !== rtl ? "turn-out-to-left" : "turn-out-to-right",
+                "pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden",
+                // Forward in a left-to-right book: the new page rides in
+                // from the right. RTL mirrors it. A fade turns the entry
+                // side into a crossfade over the page underneath.
+                prefs.animation === "fade"
+                  ? "turn-fade"
+                  : turn.forward !== rtl
+                    ? "turn-enter-right"
+                    : "turn-enter-left",
               )}
             >
-              {ghost.map((index) => (
+              {turning.map((index) => (
                 <PageImage
-                  key={`ghost-${open.pages[index]}`}
+                  key={open.pages[index]}
                   source={open.pages[index]}
                   online={open.online}
                   fit={prefs.fit}
-                  paired={prefs.mode === "double" && ghost.length > 1}
+                  paired={prefs.mode === "double" && turning.length > 1}
                   handleRef={ghostHandle}
                   bare
                 />
@@ -810,7 +865,7 @@ export function ReaderView({
             min={0}
             max={Math.max(0, total - 1)}
             value={page}
-            onChange={(e) => setPage(Number(e.target.value))}
+            onChange={(e) => jump(Number(e.target.value))}
             className={cn(
               "h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 accent-primary",
               rtl && "[direction:rtl]",
