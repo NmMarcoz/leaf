@@ -400,6 +400,15 @@ export function ReaderView({
 
   // Where a touch started, and whether the gesture that just ended was a swipe
   // rather than a tap. Refs because neither ever needs to paint anything.
+  const turnByDrag = useCallback(
+    (dx: number) => {
+      // Dragging left pulls the next page in from the right, which is the
+      // previous page in a right-to-left book.
+      advance(dx < 0 ? (rtl ? -1 : 1) : rtl ? 1 : -1);
+    },
+    [advance, rtl],
+  );
+
   /** Translations the source has, fetched when the settings panel is opened. */
   const [translations, setTranslations] = useState<string[]>([]);
   const [switching, setSwitching] = useState(false);
@@ -413,6 +422,11 @@ export function ReaderView({
 
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  /** Where a mouse button went down. WebView synthesises no touch events from
+   * a mouse, so without this a drag ends as a plain click at the release
+   * point — which turns the page by *where the finger lifted*, the one thing
+   * a drag never reads as. */
+  const mouseDown = useRef<{ x: number; y: number } | null>(null);
 
   /**
    * Read this same chapter in another translation.
@@ -643,9 +657,31 @@ export function ReaderView({
             // thumb on a tap moves a few pixels in every direction.
             if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy)) return;
             swiped.current = true;
-            // Dragging left pulls the next page in from the right, which is the
-            // previous page in a right-to-left book.
-            advance(dx < 0 ? (rtl ? -1 : 1) : rtl ? 1 : -1);
+            turnByDrag(dx);
+          }}
+          onMouseDown={(event) => {
+            // The zoom hook claims the press whenever there is something to
+            // pan — original-size fit at scale 1 included — and says so by
+            // preventDefault-ing the mousedown before it bubbles here. That
+            // press is a pan, not a swipe, and must not also turn the page.
+            if (event.defaultPrevented || event.button !== 0) {
+              mouseDown.current = null;
+              return;
+            }
+            mouseDown.current = { x: event.clientX, y: event.clientY };
+          }}
+          onMouseUp={(event) => {
+            const from = mouseDown.current;
+            mouseDown.current = null;
+            if (!from) return;
+            const dx = event.clientX - from.x;
+            const dy = event.clientY - from.y;
+            if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy)) return;
+            // The zoom hook ends its own pan with a click that stops
+            // propagation, so a consumed gesture never reaches this click
+            // handler — and the flag below is what keeps it from firing.
+            swiped.current = true;
+            turnByDrag(dx);
           }}
         >
           {visible.map((index) => (
