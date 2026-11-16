@@ -168,51 +168,62 @@ pub async fn library_refetch_metadata(app: AppHandle, id: i64) -> Result<Series,
     blocking(move || {
         let library = open(&app)?;
         let series = library.series(SeriesId(id))?;
-        let (source, source_id) = match (&series.source, &series.source_id) {
-            (Some(source), Some(source_id)) => (source.clone(), source_id.clone()),
-            _ => anyhow::bail!("{} was added by hand; there is no source to refetch from", series.title),
-        };
-
-        let details = if parse_source(&source).is_ok() {
-            // MangaDex/Kitsu are themselves the metadata pair, so there is no
-            // source page of their own to try first — just the same
-            // search-then-AniList-then-Jikan chain `best_effort` runs after it.
-            let mut details = leaf_extensions::MangaDetails::default();
-            details.fill_from_metadata_search(&series.title);
-            details
-        } else {
-            let registry = crate::sources::load_registry(&app)?;
-            let ext_source = registry
-                .get(&source)
-                .ok_or_else(|| anyhow::anyhow!("{source:?} is not a registered source"))?;
-            leaf_extensions::MangaDetails::best_effort(ext_source.as_ref(), &source_id, &series.title)
-        };
-
-        library.set_classification(series.id, &details.tags, details.content_rating.as_deref())?;
-
-        // Only when there is none already: a refetch improving the blurb must
-        // not silently replace a cover the user picked by hand.
-        if series.cover_path.is_none() {
-            if let Some(url) = &details.cover_url {
-                if let Ok(bytes) = leaf_meta::download_image(url) {
-                    let _ = library.set_cover(series.id, &bytes);
-                }
-            }
-        }
-
-        library.set_fetched_metadata(
-            series.id,
-            &leaf_library::FetchedMetadata {
-                title: if details.title.is_empty() { series.title.clone() } else { details.title },
-                title_romaji: details.title_romaji,
-                title_native: details.title_native,
-                author: details.author.unwrap_or_default(),
-                artist: details.artist.unwrap_or_default(),
-                description: details.description.unwrap_or_default(),
-            },
-        )
+        refetch_metadata(&app, &library, &series)
     })
     .await
+}
+
+/// The network half of a metadata refresh, without the command wrapper —
+/// `add_series_from_source` runs this on the task queue after the series
+/// row exists, where the same fallback chain has to apply.
+pub(crate) fn refetch_metadata(
+    app: &AppHandle,
+    library: &Library,
+    series: &Series,
+) -> Result<Series> {
+    let (source, source_id) = match (&series.source, &series.source_id) {
+        (Some(source), Some(source_id)) => (source.clone(), source_id.clone()),
+        _ => anyhow::bail!("{} was added by hand; there is no source to refetch from", series.title),
+    };
+
+    let details = if parse_source(&source).is_ok() {
+        // MangaDex/Kitsu are themselves the metadata pair, so there is no
+        // source page of their own to try first — just the same
+        // search-then-AniList-then-Jikan chain `best_effort` runs after it.
+        let mut details = leaf_extensions::MangaDetails::default();
+        details.fill_from_metadata_search(&series.title);
+        details
+    } else {
+        let registry = crate::sources::load_registry(app)?;
+        let ext_source = registry
+            .get(&source)
+            .ok_or_else(|| anyhow::anyhow!("{source:?} is not a registered source"))?;
+        leaf_extensions::MangaDetails::best_effort(ext_source.as_ref(), &source_id, &series.title)
+    };
+
+    library.set_classification(series.id, &details.tags, details.content_rating.as_deref())?;
+
+    // Only when there is none already: a refetch improving the blurb must
+    // not silently replace a cover the user picked by hand.
+    if series.cover_path.is_none() {
+        if let Some(url) = &details.cover_url {
+            if let Ok(bytes) = leaf_meta::download_image(url) {
+                let _ = library.set_cover(series.id, &bytes);
+            }
+        }
+    }
+
+    library.set_fetched_metadata(
+        series.id,
+        &leaf_library::FetchedMetadata {
+            title: if details.title.is_empty() { series.title.clone() } else { details.title },
+            title_romaji: details.title_romaji,
+            title_native: details.title_native,
+            author: details.author.unwrap_or_default(),
+            artist: details.artist.unwrap_or_default(),
+            description: details.description.unwrap_or_default(),
+        },
+    )
 }
 
 /// Which translations the source has for a series already in the library.
