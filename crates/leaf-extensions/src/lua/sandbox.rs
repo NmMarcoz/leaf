@@ -45,7 +45,14 @@ pub fn new_vm() -> Result<(Lua, mlua::Table)> {
     // *bytecode*, which the reference manual itself warns is unsafe to accept
     // from anything you don't already trust.
     let globals = lua.globals();
-    for name in ["load", "loadstring", "loadfile", "dofile", "require", "collectgarbage"] {
+    for name in [
+        "load",
+        "loadstring",
+        "loadfile",
+        "dofile",
+        "require",
+        "collectgarbage",
+    ] {
         globals
             .set(name, mlua::Value::Nil)
             .map_err(|e| anyhow!("removing the {name} global: {e}"))?;

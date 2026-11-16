@@ -113,7 +113,7 @@ local function md5(message)
 end
 
 --[[ ---------------------------------------------------- token & dates ---
-`mangalize.time.now()` is the only clock the sandbox exposes (no `os`), so
+`leaf.time.now()` is the only clock the sandbox exposes (no `os`), so
 the UTC calendar breakdown the token needs is computed from the raw Unix
 timestamp by hand — Howard Hinnant's days-from-civil algorithm, run backwards. ]]
 
@@ -136,7 +136,7 @@ local function utc_hour_string(unixtime)
 end
 
 local function generate_token()
-  local timestamp = mangalize.time.now()
+  local timestamp = leaf.time.now()
   local secret = "mng_ch_" .. utc_hour_string(timestamp)
   local token = md5(tostring(timestamp) .. secret):sub(1, 16)
   return token, timestamp
@@ -157,7 +157,7 @@ end
 -- alike; only `sort` and `search` differ. Filtering by year/genre/type/status
 -- is left off (empty JSON-encoded arrays) since nothing in `Source` asks for it.
 local function browse(page, search, sort)
-  local body = mangalize.json.encode({
+  local body = leaf.json.encode({
     page = page,
     search = search or "",
     years = "[]",
@@ -167,8 +167,8 @@ local function browse(page, search, sort)
     sort = sort,
     genreMatchMode = "any",
   })
-  local res = mangalize.http.post(SOURCE.base_url .. "/wp-json/manga/v1/load", body)
-  local rows = mangalize.json.decode(res.body)
+  local res = leaf.http.post(SOURCE.base_url .. "/wp-json/manga/v1/load", body)
+  local rows = leaf.json.decode(res.body)
 
   local manga = {}
   for i, row in ipairs(rows) do
@@ -197,9 +197,9 @@ function search(query, page)
     return { manga = {}, has_next_page = false }
   end
 
-  local body = mangalize.json.encode({ query = query, limit = 30 })
-  local res = mangalize.http.post(SOURCE.base_url .. "/auth/search", body)
-  local data = mangalize.json.decode(res.body)
+  local body = leaf.json.encode({ query = query, limit = 30 })
+  local res = leaf.http.post(SOURCE.base_url .. "/auth/search", body)
+  local data = leaf.json.decode(res.body)
   if not data.success then
     error("search: " .. (data.message or "request refused"))
   end
@@ -214,7 +214,7 @@ end
 --[[ -------------------------------------------------------- detail page - ]]
 
 local function fetch_detail_page(id)
-  local res = mangalize.http.get(SOURCE.base_url .. "/manga/" .. id)
+  local res = leaf.http.get(SOURCE.base_url .. "/manga/" .. id)
   return res.body
 end
 
@@ -223,9 +223,9 @@ end
 -- generic Tailwind utility classes reused all over the page, while this
 -- block is a stable, structured summary the site maintains for SEO.
 local function comic_series_ld(document)
-  local scripts = mangalize.html.select(document, 'script[type="application/ld+json"]')
+  local scripts = leaf.html.select(document, 'script[type="application/ld+json"]')
   for _, row in ipairs(scripts) do
-    local ok, parsed = pcall(mangalize.json.decode, row.text)
+    local ok, parsed = pcall(leaf.json.decode, row.text)
     if ok and parsed["@type"] == "ComicSeries" then
       return parsed
     end
@@ -237,13 +237,13 @@ function manga_details(id)
   local document = fetch_detail_page(id)
   local ld = comic_series_ld(document)
 
-  local title_rows = mangalize.html.select(document, "h1")
+  local title_rows = leaf.html.select(document, "h1")
   local title = title_rows[1] and title_rows[1].text or ld.name
 
-  local description_rows = mangalize.html.select(document, "#description-content-tab")
+  local description_rows = leaf.html.select(document, "#description-content-tab")
   local description = description_rows[1] and description_rows[1].text or ld.description
 
-  local cover_rows = mangalize.html.select(document, 'meta[property="og:image"]')
+  local cover_rows = leaf.html.select(document, 'meta[property="og:image"]')
   local cover_url = cover_rows[1] and cover_rows[1].attrs.content or ld.image
 
   -- The page lists "Author & Artist" as one combined credit; MangaTaro
@@ -251,7 +251,7 @@ function manga_details(id)
   local author = ld.author and ld.author.name or nil
 
   local seen, tags = {}, {}
-  for _, row in ipairs(mangalize.html.select(document, 'a[href*="/tag/"]')) do
+  for _, row in ipairs(leaf.html.select(document, 'a[href*="/tag/"]')) do
     if row.text ~= "" and not seen[row.text] then
       seen[row.text] = true
       tags[#tags + 1] = row.text
@@ -277,7 +277,7 @@ local UNSORTED = "Unsorted"
 
 function volumes(id, language)
   local document = fetch_detail_page(id)
-  local id_rows = mangalize.html.select(document, "[data-manga-id]")
+  local id_rows = leaf.html.select(document, "[data-manga-id]")
   if not id_rows[1] then
     error("could not find this manga's internal id on its page")
   end
@@ -296,8 +296,8 @@ function volumes(id, language)
       .. token
       .. "&_ts="
       .. timestamp
-    local res = mangalize.http.get(url)
-    local data = mangalize.json.decode(res.body)
+    local res = leaf.http.get(url)
+    local data = leaf.json.decode(res.body)
     if not data.success then
       error("manga-chapters: " .. (data.message or "request refused"))
     end
@@ -323,7 +323,7 @@ end
 function covers(id)
   local document = fetch_detail_page(id)
   local results = {}
-  for _, row in ipairs(mangalize.html.select(document, ".gallery-item")) do
+  for _, row in ipairs(leaf.html.select(document, ".gallery-item")) do
     local url = row.attrs["data-large-url"]
     if url then
       results[#results + 1] = { url = url }
@@ -335,8 +335,8 @@ end
 --[[ ---------------------------------------------------------- page_list - ]]
 
 function page_list(chapter_id)
-  local res = mangalize.http.get(SOURCE.base_url .. "/auth/chapter-content?chapter_id=" .. chapter_id)
-  local data = mangalize.json.decode(res.body)
+  local res = leaf.http.get(SOURCE.base_url .. "/auth/chapter-content?chapter_id=" .. chapter_id)
+  local data = leaf.json.decode(res.body)
   if not data.success then
     error("chapter-content: " .. (data.message or "request refused"))
   end

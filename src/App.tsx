@@ -23,6 +23,7 @@ import { HistoryView } from "@/views/HistoryView";
 import { ReaderView } from "@/views/ReaderView";
 import type { ReaderTarget } from "@/lib/reader";
 import { SendView } from "@/views/SendView";
+import { ExtensionsView } from "@/views/ExtensionsView";
 import { SettingsView } from "@/views/SettingsView";
 import { WelcomeView } from "@/views/WelcomeView";
 import { useUpdater } from "@/hooks/useUpdater";
@@ -48,6 +49,7 @@ type View =
   // from — the series page, history, or the middle of a browse.
   | { kind: "reader"; target: ReaderTarget; back: View }
   | { kind: "send" }
+  | { kind: "extensions" }
   | { kind: "settings" }
   | { kind: "editor"; from: { seriesId: number; number: string } | null };
 
@@ -98,6 +100,13 @@ export default function App() {
   // Owned here so the OS listener lives as long as the window; Settings edits it.
   const [theme, setTheme] = useTheme();
   const { tasks, active } = useTasks();
+  // Every task that has finished, one way or another. An add-through-source
+  // row fills its cover and chapter counts on the task thread, so the shelf
+  // re-reads whenever this grows — a number the view can key an effect on
+  // without re-fetching on every progress tick of a running download.
+  const settleCount = tasks.filter(
+    (task) => task.state !== "queued" && task.state !== "running",
+  ).length;
 
   const updater = useUpdater();
 
@@ -308,6 +317,10 @@ export default function App() {
       return <SendView onSaved={() => {}} onError={setError} />;
     }
 
+    if (view.kind === "extensions") {
+      return <ExtensionsView onError={setError} />;
+    }
+
     if (view.kind === "settings") {
       return (
         <SettingsView
@@ -329,6 +342,7 @@ export default function App() {
           onOpenSeries={(id) => setView({ kind: "series", id, selectedVolume: null })}
           onOpenFolder={() => void pickFolder()}
           onError={setError}
+          settleCount={settleCount}
         />
       );
     }
@@ -414,6 +428,7 @@ export default function App() {
   const section: Section =
     view.kind === "settings" ||
     view.kind === "send" ||
+    view.kind === "extensions" ||
     view.kind === "explore" ||
     view.kind === "history"
       ? view.kind

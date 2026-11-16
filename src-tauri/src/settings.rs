@@ -89,6 +89,34 @@ pub struct Settings {
     /// not been welcomed yet and is about to see the first-run screen, which
     /// a changelog on top of would only be noise for.
     pub last_seen_version: Option<String>,
+    /// Fingerprints (sha256 hex) of user `.lua` extensions the user has
+    /// explicitly approved, per the trust gate in `Registry::
+    /// load_governed_extensions`.
+    ///
+    /// Content-addressed rather than path-addressed on purpose: renaming or
+    /// moving the file keeps it approved, and editing it does not — a script
+    /// the user said yes to is only the script they saw.
+    ///
+    /// `serde(default)` because the frontend round-trips the whole struct
+    /// through `set_settings`, and a settings file written before this field
+    /// existed — or a caller that does not know about it — must not fail.
+    #[serde(default)]
+    pub approved_extensions: Vec<String>,
+    /// Extension files the user marked *in development*: registered whatever
+    /// their current bytes are, so saving a work-in-progress script does not
+    /// re-ask on every edit. Keyed by filename inside `<library>/extensions/`,
+    /// because that is a promise about a file the user is actively editing,
+    /// not about content. Locking one records its fingerprint as an approval
+    /// and drops it from this list; from then on `approved_extensions` is the
+    /// only thing that runs it.
+    #[serde(default)]
+    pub dev_extensions: Vec<String>,
+    /// Extension files the user switched off: listed by the panel, never
+    /// loaded. Keyed by filename like dev mode — deactivating is a statement
+    /// about the entry in the list, and reactivating should find the file
+    /// wherever the author left it.
+    #[serde(default)]
+    pub disabled_extensions: Vec<String>,
 }
 
 /// The on-disk shape. Every field optional so an older file still loads.
@@ -105,6 +133,9 @@ struct Stored {
     delivery: Option<DeliveryConfig>,
     welcomed: Option<bool>,
     last_seen_version: Option<String>,
+    approved_extensions: Option<Vec<String>>,
+    dev_extensions: Option<Vec<String>>,
+    disabled_extensions: Option<Vec<String>>,
 }
 
 pub fn load(app: &AppHandle) -> Result<Settings> {
@@ -142,6 +173,9 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
         delivery: stored.delivery.unwrap_or_default(),
         welcomed: stored.welcomed.unwrap_or(false),
         last_seen_version: stored.last_seen_version,
+        approved_extensions: stored.approved_extensions.unwrap_or_default(),
+        dev_extensions: stored.dev_extensions.unwrap_or_default(),
+        disabled_extensions: stored.disabled_extensions.unwrap_or_default(),
     })
 }
 
@@ -161,6 +195,9 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
             delivery: Some(next.delivery.clone()),
             welcomed: Some(next.welcomed),
             last_seen_version: next.last_seen_version.clone(),
+            approved_extensions: Some(next.approved_extensions.clone()),
+            dev_extensions: Some(next.dev_extensions.clone()),
+            disabled_extensions: Some(next.disabled_extensions.clone()),
         },
     )
 }
@@ -217,7 +254,10 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
 pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     crate::util::blocking(move || {
         std::fs::create_dir_all(&settings.library_root).with_context(|| {
-            format!("creating library folder {}", settings.library_root.display())
+            format!(
+                "creating library folder {}",
+                settings.library_root.display()
+            )
         })?;
         if let Some(output) = &settings.output_root {
             std::fs::create_dir_all(output)

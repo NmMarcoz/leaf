@@ -29,7 +29,11 @@ pub enum SourcesCommand {
 pub fn run(command: SourcesCommand) -> Result<()> {
     match command {
         SourcesCommand::List => list(),
-        SourcesCommand::Test { script, id, popular } => test(&script, &id, popular),
+        SourcesCommand::Test {
+            script,
+            id,
+            popular,
+        } => test(&script, &id, popular),
     }
 }
 
@@ -41,8 +45,8 @@ fn list() -> Result<()> {
 }
 
 fn test(script: &std::path::Path, id: &str, popular: bool) -> Result<()> {
-    let text = std::fs::read_to_string(script)
-        .with_context(|| format!("reading {}", script.display()))?;
+    let text =
+        std::fs::read_to_string(script).with_context(|| format!("reading {}", script.display()))?;
     let source = LuaSource::load(text).context("loading the source script")?;
 
     println!("id       {}", source.info().id);
@@ -53,7 +57,11 @@ fn test(script: &std::path::Path, id: &str, popular: bool) -> Result<()> {
 
     if popular {
         let page = source.popular(1).context("popular(1)")?;
-        println!("popular  {} results, has_next_page={}", page.manga.len(), page.has_next_page);
+        println!(
+            "popular  {} results, has_next_page={}",
+            page.manga.len(),
+            page.has_next_page
+        );
         for m in &page.manga {
             println!("  {:<20} {}", m.id, m.title);
         }

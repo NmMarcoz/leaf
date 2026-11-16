@@ -37,6 +37,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # for Android in this project's pipeline.
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 scraper = "0.27"
+sha2 = "0.10"
 
 # Image encoding in the test fixtures is unusably slow when `image` is built
 # unoptimised. Our own crates stay debuggable.

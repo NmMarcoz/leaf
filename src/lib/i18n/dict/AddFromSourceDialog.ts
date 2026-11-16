@@ -12,6 +12,14 @@ const dict: PartialDictionary = {
     "addFromSourceDialog.seriesNamePlaceholder": "Series name…",
     "addFromSourceDialog.pressEnter": "Press Enter to search.",
     "addFromSourceDialog.noMatches": "No matches.",
+    "addFromSourceDialog.pendingTitle":
+      "{count} extension file loads but is not approved yet. An extension is code running with your app's network access — approve one only if you have read it or trust whoever wrote it.",
+    "addFromSourceDialog.approve": "Approve",
+    "addFromSourceDialog.develop": "Develop",
+    "addFromSourceDialog.devTitle":
+      "{count} extension is in development mode: it runs whatever its current contents are, with no byte-for-byte lock. Lock it when you are done editing.",
+    "addFromSourceDialog.lock": "Lock",
+    "addFromSourceDialog.stopDeveloping": "Remove",
     "addFromSourceDialog.cancel": "Cancel",
     "addFromSourceDialog.addToLibrary": "Add to library",
   },
@@ -26,6 +34,14 @@ const dict: PartialDictionary = {
     "addFromSourceDialog.seriesNamePlaceholder": "Nome da série…",
     "addFromSourceDialog.pressEnter": "Aperte Enter para pesquisar.",
     "addFromSourceDialog.noMatches": "Nenhum resultado.",
+    "addFromSourceDialog.pendingTitle":
+      "{count} arquivo de extensão carrega, mas ainda não foi aprovado. Uma extensão é código rodando com o acesso de rede do seu app — aprove uma só se você a leu ou confia em quem a escreveu.",
+    "addFromSourceDialog.approve": "Aprovar",
+    "addFromSourceDialog.develop": "Desenvolver",
+    "addFromSourceDialog.devTitle":
+      "{count} extensão está em modo de desenvolvimento: roda com o conteúdo atual, sem trava byte a byte. Trave quando terminar de editar.",
+    "addFromSourceDialog.lock": "Travar",
+    "addFromSourceDialog.stopDeveloping": "Remover",
     "addFromSourceDialog.cancel": "Cancelar",
     "addFromSourceDialog.addToLibrary": "Adicionar à biblioteca",
   },
