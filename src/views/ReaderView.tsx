@@ -333,6 +333,27 @@ export function ReaderView({
 
   const step = prefs.mode === "double" ? 2 : 1;
 
+  /**
+   * A page turn, with the page index it left from.
+   *
+   * `id` increments per turn so a second one mid-flight restarts the
+   * animation via key instead of being swallowed as "class already applied".
+   * Only `advance()` sets it: the position slider, Home/End and chapter
+   * changes jump, and animating a jump would pretend they turned pages.
+   */
+  const [turn, setTurn] = useState<{ from: number; forward: boolean; id: number } | null>(null);
+
+  /** The pair indices the given page starts a view with, in screen order. */
+  const pagesAt = useCallback(
+    (start: number): number[] => {
+      if (!open) return [];
+      if (prefs.mode !== "double") return [start];
+      const pair = [start, start + 1].filter((i) => i < open.pages.length);
+      return rtl ? pair.reverse() : pair;
+    },
+    [open, prefs.mode, rtl],
+  );
+
   const advance = useCallback(
     (delta: number) => {
       if (!open) return;
@@ -346,7 +367,13 @@ export function ReaderView({
         if (open.next) onNavigate(open.next);
         return;
       }
+      // Zooming rides a transform on the image; letting it persist into a
+      // turn would slide a panned crop off-screen as the "old" page.
+      zoomHandle.current?.reset();
       setPage(next);
+      if (prefs.mode !== "webtoon") {
+        setTurn((current) => ({ from: page, forward: delta > 0, id: (current?.id ?? 0) + 1 }));
+      }
 
       if (prefs.mode === "webtoon") {
         scroller.current
@@ -445,6 +472,9 @@ export function ReaderView({
 
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  /** The outgoing page during a turn animates but reads nothing, so its
+   * handle lands here — a ref the keyboard never consults. */
+  const ghostHandle = useRef<ZoomHandle | null>(null);
   /**
    * The zoom handle of whichever page image is currently mounted. In paged
    * and double mode at most two images exist and only one can be zoomed, so
@@ -526,13 +556,16 @@ export function ReaderView({
         ? "bg-neutral-800"
         : "bg-black";
 
-  const visible = useMemo(() => {
-    if (!open) return [];
-    if (prefs.mode !== "double") return [page];
-    // Facing pair. In a right-to-left book the earlier page sits on the right.
-    const pair = [page, page + 1].filter((i) => i < open.pages.length);
-    return rtl ? pair.reverse() : pair;
-  }, [open, page, prefs.mode, rtl]);
+  const visible = useMemo(() => pagesAt(page), [pagesAt, page]);
+
+  // The outgoing view, frozen at the moment of the turn: same shape
+  // (pairing, order) as the page it left. Its images come from the decode
+  // cache — the chapter they belong to was just on screen — so a ghost never
+  // fetches and never flashes.
+  const ghost = useMemo(
+    () => (turn ? pagesAt(turn.from) : []),
+    [turn, pagesAt],
+  );
 
   // Loading and failure both need the way out. Being unable to leave a screen
   // that will never finish is worse than the thing that went wrong.
@@ -725,6 +758,38 @@ export function ReaderView({
               handleRef={zoomHandle}
             />
           ))}
+
+          {turn && ghost.length > 0 && (
+            <div
+              // Keyed by turn id: a second turn mid-flight remounts the ghost
+              // and its exit animation starts over instead of carrying on.
+              // pointer-events-none and a dead handle ref: the ghost is the
+              // page leaving, not a page anyone reads or pans.
+              key={turn.id}
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget) setTurn(null);
+              }}
+              className={cn(
+                "pointer-events-none absolute inset-0 z-10 flex items-center justify-center",
+                // Forward slides the old page out toward the trailing edge
+                // — left in a left-to-right book, right in a right-to-left
+                // one — revealing the new page underneath it.
+                turn.forward !== rtl ? "turn-out-to-left" : "turn-out-to-right",
+              )}
+            >
+              {ghost.map((index) => (
+                <PageImage
+                  key={`ghost-${open.pages[index]}`}
+                  source={open.pages[index]}
+                  online={open.online}
+                  fit={prefs.fit}
+                  paired={prefs.mode === "double" && ghost.length > 1}
+                  handleRef={ghostHandle}
+                  bare
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -799,6 +864,7 @@ function PageImage({
   fit,
   paired,
   handleRef,
+  bare,
 }: {
   source: string;
   online: boolean;
@@ -806,6 +872,8 @@ function PageImage({
   paired: boolean;
   /** Claims this image's pan handle for the arrow keys while it is mounted. */
   handleRef: React.MutableRefObject<ZoomHandle | null>;
+  /** A turn ghost: rendered for the animation only, never keyboard-visible. */
+  bare?: boolean;
 }) {
   const t = useT();
   const zoom = useImageZoom<HTMLImageElement>();
@@ -819,9 +887,10 @@ function PageImage({
 
   // The keyboard arrows pan whichever image is actually zoomed or panned,
   // not merely mounted: in double mode both pages register otherwise, and
-  // the last one mounted would swallow arrows aimed at the first.
+  // the last one mounted would swallow arrows aimed at the first. A ghost
+  // never registers at all — it is mid-exit and inert.
   useEffect(() => {
-    if (!zoom.moved) return;
+    if (bare || !zoom.moved) return;
     handleRef.current = zoom.handle;
     return () => {
       if (handleRef.current === zoom.handle) handleRef.current = null;
