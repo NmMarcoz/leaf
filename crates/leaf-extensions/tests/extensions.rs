@@ -175,6 +175,11 @@ fn fixture_script(base: &str) -> String {
 
 #[test]
 fn a_lua_source_answers_every_call_through_the_real_host_api() {
+    // The fixture serves from 127.0.0.1, which `net_guard` refuses for
+    // scripts by default — this escape hatch is exactly why the variable
+    // exists. Enforcement itself is covered in `net_guard`'s unit tests,
+    // which run in a separate binary where the variable is never set.
+    std::env::set_var("LEAF_ALLOW_PRIVATE_SOURCES", "1");
     let server = Server::start();
     let source = LuaSource::load(fixture_script(&server.base)).unwrap();
 

@@ -12,6 +12,7 @@ crates/Leaf-core/    the pipeline. No UI, no Tauri, no network. Ever.
 crates/Leaf-meta/    MangaDex + Kitsu clients. Networked.
 crates/Leaf-library/ the stored collection: SQLite index + files. No network.
 crates/Leaf-fetch/   page-URL -> image candidates -> downloads. Networked.
+crates/leaf-extensions/ pluggable sources: Rust natives + sandboxed .lua scripts.
 crates/Leaf-cli/     `Leaf` binary; thin wrapper over the above.
 src-tauri/                Tauri v2 shell. Commands only; no pipeline logic.
 src/                      React 19 + Vite 8 + Tailwind 4 frontend.
@@ -109,6 +110,65 @@ Thresholds are named consts at the top of `sieve.rs` (`HEIGHT_MIN`, `WIDTH_MAX`,
 - `volume_sort_key` keeps "10" after "2" and unparseable labels last.
 - AniList is out (public API disabled by its operators). Kitsu is the fallback
   and has no per-volume data.
+
+## Scripted sources (`crates/leaf-extensions`)
+
+Third-party manga sites are `.lua` files, not compiled Rust and not WASM —
+chosen so a Keiyoushi/Tachiyomi extension can be ported by eye (the `Source`
+trait mirrors `CatalogueSource`/`HttpSource` on purpose). MangaDex stays native
+Rust behind the same trait; "works as an extension" means registry membership,
+not implementation language.
+
+- **Where scripts live: `<library root>/extensions/`** (`src-tauri/src/sources.rs`),
+  *not* the app install folder. Same folder the CLI reads, so it travels with the
+  user's library and survives reinstalls. A script that fails to load is skipped
+  silently in the app (the CLI prints to stderr); missing folder is not an error.
+- **The host global is `leaf`, and only `leaf`.** `sandbox.rs` builds a VM with
+  just TABLE/STRING/UTF8/MATH stdlibs, nils out `load`/`loadstring`/`loadfile`/
+  `dofile`/`require`/`collectgarbage` by hand (they survive `StdLib` gating and
+  `load` accepts untrusted bytecode), and installs one `leaf` table with
+  `http`/`html`/`json`/`time`. There is no `os`, no `io`, no ambient network —
+  `leaf.http` is the only way out, and only to origins the script's `SOURCE`
+  manifest declared. Renaming the app does NOT rename this global; a script
+  calling `mangalize.*` fails at call time, not load time, because functions
+  resolve `leaf.http.get` when they run.
+- **No crypto library in the sandbox.** `example.lua` carries a pure-Lua MD5
+  (masked 32-bit ops on Lua 5.4's 64-bit operators) because the site's chapter
+  endpoint demands `md5(timestamp .. …)` and there is nothing to call. That's the
+  precedent: exotic needs get implemented in Lua, not added to the host.
+- **One VM per source, on a dedicated thread.** `mlua::Lua` is not `Send`, so
+  `LuaSource` spawns a `leaf-lua-source` thread and every `Source` method is a
+  channel message (`ask`) to it — same shape as `tasks.rs`'s single worker.
+  Each call is bounded by `CALL_TIMEOUT` (20 s) via a debug hook, since Lua 5.4
+  has no interrupt API; a timed-out script poisons the thread and the source is
+  dead from then on. `load()` blocks until `SOURCE` is read, so broken scripts
+  fail at registration, not first use.
+- **Two defenses over the one door.** `leaf.http` is still the only way a
+  script reaches the network (`host/http.rs`), and behind it:
+  - `net_guard` refuses any address that is not publicly routable — loopback,
+    RFC1918, link-local (every cloud metadata IP), CGNAT, multicast, the
+    metadata hostnames — via a custom ureq resolver, so the checked addresses
+    are exactly the ones dialed (no TOCTOU rebinding). Redirects are disabled
+    in the agent and followed by hand in `host/http.rs`, re-running origin pin
+    + guard per hop: ureq's own following let a first server steer a request
+    anywhere. `page_list`'s returned URLs pass the same name-level check —
+    they are the one script output the *host itself* requests next.
+  - a **trust gate**: the app registers a user script only if its sha256
+    fingerprint sits in settings (`approved_extensions`); otherwise it shows
+    as *pending* in AddFromSourceDialog with its name/id/base_url.
+    Content-addressed on purpose — an edit after approval unapproves. Files
+    in `dev_extensions` (the "Develop" button) bypass the fingerprint
+    entirely so an author can save-and-test in the GUI; "Lock" freezes the
+    current bytes as the approval and drops the file from the list — which
+    is why dev mode is keyed by *filename*, and why a script can never
+    declare itself dev-approved (that list lives in settings, not in the
+    file). The CLI stays ungated.
+- **`LEAF_ALLOW_PRIVATE_SOURCES=1` disables the guard.** The env var is the
+  user's own choice, never a script's: without it the localhost test fixtures
+  and anyone developing against a local server could not run. Set at request
+  time, not startup, so tests can flip it.
+- Verifying a script loads without the GUI: `LuaSource::load(std::fs::read…)` is
+  public — a two-line test against the real file is the fastest smoke check.
 
 ## The library (`crates/Leaf-library`)
 

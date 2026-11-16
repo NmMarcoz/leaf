@@ -154,19 +154,17 @@ pub struct BatchPlan {
 /// `wanted` is normally the library's list of missing chapters, which is what
 /// makes this bounded: there is no blind crawling outward, only a check for the
 /// specific chapters that are known to exist and known to be absent.
-pub fn plan_batch(
-    page_url: &str,
-    wanted: &[String],
-    progress: &mut Progress,
-) -> Result<BatchPlan> {
+pub fn plan_batch(page_url: &str, wanted: &[String], progress: &mut Progress) -> Result<BatchPlan> {
     let html = fetch_html(page_url)?;
     let links = series::chapter_links(page_url, &html);
 
     // A template from the URL the user pasted describes the site better than one
     // inferred from a link, because it is the page they know works.
-    let template = series::split(page_url)
-        .map(|(t, _)| t)
-        .or_else(|| links.first().and_then(|l| series::split(&l.url).map(|(t, _)| t)));
+    let template = series::split(page_url).map(|(t, _)| t).or_else(|| {
+        links
+            .first()
+            .and_then(|l| series::split(&l.url).map(|(t, _)| t))
+    });
 
     let by_number: std::collections::HashMap<&str, &series::ChapterLink> =
         links.iter().map(|l| (l.number.as_str(), l)).collect();
@@ -196,7 +194,11 @@ pub fn plan_batch(
 
     for ((number, url), ok) in guesses.into_iter().zip(alive) {
         if ok {
-            items.push(BatchItem { number, url, found: Found::Guessed });
+            items.push(BatchItem {
+                number,
+                url,
+                found: Found::Guessed,
+            });
         } else {
             unresolved.push(number);
         }

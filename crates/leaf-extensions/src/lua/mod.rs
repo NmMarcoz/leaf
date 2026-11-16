@@ -111,7 +111,17 @@ impl Source for LuaSource {
     }
 
     fn page_list(&self, chapter_id: &str) -> Result<Vec<String>> {
-        self.ask(|reply| Call::PageList(chapter_id.to_string(), reply))
+        let pages = self.ask(|reply| Call::PageList(chapter_id.to_string(), reply))?;
+        // These URLs are the one output that leaves the sandbox as a *request
+        // the host itself makes* — the downloader fetches them verbatim — so
+        // a script that returns `http://169.254.169.254/...` here would
+        // otherwise probe the user's network through the app. Origin pinning
+        // is too strict (CDN-hosted pages legitimately live off the site's
+        // origin); the private-address rule is not negotiable.
+        Ok(pages
+            .into_iter()
+            .filter(|url| crate::net_guard::url_is_public(url))
+            .collect())
     }
 }
 
@@ -174,19 +184,22 @@ fn init(script: &str) -> Result<(mlua::Lua, SourceInfo)> {
         .globals()
         .get("SOURCE")
         .map_err(|_| anyhow!("script does not define a SOURCE table"))?;
-    let id: String = source_table.get("id").map_err(|_| anyhow!("SOURCE.id is required"))?;
+    let id: String = source_table
+        .get("id")
+        .map_err(|_| anyhow!("SOURCE.id is required"))?;
     let name: String = source_table
         .get("name")
         .map_err(|_| anyhow!("SOURCE.name is required"))?;
-    let lang: String = source_table.get("lang").unwrap_or_else(|_| "en".to_string());
+    let lang: String = source_table
+        .get("lang")
+        .unwrap_or_else(|_| "en".to_string());
     let base_url: String = source_table
         .get("base_url")
         .map_err(|_| anyhow!("SOURCE.base_url is required"))?;
     let mirrors: Vec<String> = source_table.get("mirrors").unwrap_or_default();
 
-    let mut allowed_origins: Vec<String> = leaf_fetch::url::origin_of(&base_url)
-        .into_iter()
-        .collect();
+    let mut allowed_origins: Vec<String> =
+        leaf_fetch::url::origin_of(&base_url).into_iter().collect();
     for mirror in &mirrors {
         allowed_origins.extend(leaf_fetch::url::origin_of(mirror));
     }
@@ -197,7 +210,15 @@ fn init(script: &str) -> Result<(mlua::Lua, SourceInfo)> {
     host::install(&lua, &leaf, allowed_origins)
         .map_err(|e| anyhow!("installing host functions: {e}"))?;
 
-    Ok((lua, SourceInfo { id, name, lang, base_url }))
+    Ok((
+        lua,
+        SourceInfo {
+            id,
+            name,
+            lang,
+            base_url,
+        },
+    ))
 }
 
 fn call_paged(lua: &mlua::Lua, function: &str, page: u32) -> Result<MangasPage> {
@@ -215,8 +236,9 @@ fn call_search(lua: &mlua::Lua, query: &str, page: u32) -> Result<MangasPage> {
         .globals()
         .get("search")
         .map_err(|_| anyhow!("script does not define search(query, page)"))?;
-    let table: Table = sandbox::call_with_timeout(lua, sandbox::CALL_TIMEOUT, || f.call((query, page)))
-        .map_err(|e| anyhow!("search({query:?}, {page}): {e}"))?;
+    let table: Table =
+        sandbox::call_with_timeout(lua, sandbox::CALL_TIMEOUT, || f.call((query, page)))
+            .map_err(|e| anyhow!("search({query:?}, {page}): {e}"))?;
     read_manga_page(&table)
 }
 
@@ -235,8 +257,9 @@ fn call_volumes(lua: &mlua::Lua, id: &str, language: Option<&str>) -> Result<Vec
         .globals()
         .get("volumes")
         .map_err(|_| anyhow!("script does not define volumes(id, language)"))?;
-    let table: Table = sandbox::call_with_timeout(lua, sandbox::CALL_TIMEOUT, || f.call((id, language)))
-        .map_err(|e| anyhow!("volumes({id:?}, {language:?}): {e}"))?;
+    let table: Table =
+        sandbox::call_with_timeout(lua, sandbox::CALL_TIMEOUT, || f.call((id, language)))
+            .map_err(|e| anyhow!("volumes({id:?}, {language:?}): {e}"))?;
     read_volume_chapters(&table)
 }
 
@@ -255,8 +278,9 @@ fn call_page_list(lua: &mlua::Lua, chapter_id: &str) -> Result<Vec<String>> {
         .globals()
         .get("page_list")
         .map_err(|_| anyhow!("script does not define page_list(chapter_id)"))?;
-    let table: Table = sandbox::call_with_timeout(lua, sandbox::CALL_TIMEOUT, || f.call(chapter_id))
-        .map_err(|e| anyhow!("page_list({chapter_id:?}): {e}"))?;
+    let table: Table =
+        sandbox::call_with_timeout(lua, sandbox::CALL_TIMEOUT, || f.call(chapter_id))
+            .map_err(|e| anyhow!("page_list({chapter_id:?}): {e}"))?;
     read_strings(&table)
 }
 
@@ -272,14 +296,19 @@ fn read_manga_page(table: &Table) -> Result<MangasPage> {
     for pair in rows.sequence_values::<Table>() {
         let row = pair.map_err(|e| anyhow!("reading a manga entry: {e}"))?;
         manga.push(MangaSummary {
-            id: row.get("id").map_err(|_| anyhow!("a manga entry is missing `id`"))?,
+            id: row
+                .get("id")
+                .map_err(|_| anyhow!("a manga entry is missing `id`"))?,
             title: row
                 .get("title")
                 .map_err(|_| anyhow!("a manga entry is missing `title`"))?,
             cover_url: row.get("cover_url").unwrap_or(None),
         });
     }
-    Ok(MangasPage { manga, has_next_page })
+    Ok(MangasPage {
+        manga,
+        has_next_page,
+    })
 }
 
 fn read_manga_details(table: &Table) -> Result<MangaDetails> {

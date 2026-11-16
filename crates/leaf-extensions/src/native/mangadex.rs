@@ -58,11 +58,7 @@ impl Source for MangaDexSource {
         Ok(into_details(leaf_meta::mangadex::manga(id)?))
     }
 
-    fn volumes(
-        &self,
-        id: &str,
-        language: Option<&str>,
-    ) -> Result<Vec<leaf_meta::VolumeChapters>> {
+    fn volumes(&self, id: &str, language: Option<&str>) -> Result<Vec<leaf_meta::VolumeChapters>> {
         leaf_meta::volume_chapters_in(leaf_meta::Source::MangaDex, id, language)
     }
 
