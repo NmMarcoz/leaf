@@ -257,8 +257,7 @@ jobs:
           # AppImage (everything else, including Arch). Built on 22.04 rather
           # than the newer runners because Tauri's docs want the oldest glibc
           # you intend to support — a binary linked against 2.35 runs on every
-          # distro since, one linked against 2.39 breaks the older ones. The
-          # .rpm needs rpmbuild, hence rpm-build in the apt step.
+          # distro since, one linked against 2.39 breaks the older ones.
           - platform: ubuntu-22.04
             args: ""
             rust-targets: ""
@@ -285,9 +284,10 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
-      # Same stack the `check` job installs so the webview links, plus what the
-      # Linux bundlers alone need: rpm-build for the .rpm (rpmbuild is NOT on
-      # Debian runners by default) and patchelf for the AppImage.
+      # Same stack the `check` job installs so the webview links, plus patchelf
+      # for the AppImage. Nothing for the .rpm: Tauri writes it with the `rpm`
+      # crate, not rpmbuild — and `rpm-build`, the package name that was here,
+      # is Fedora's and does not exist on Ubuntu, so apt failed the whole job.
       - name: Linux bundler dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -298,8 +298,7 @@ jobs:
             librsvg2-dev \
             libxdo-dev \
             libssl-dev \
-            patchelf \
-            rpm-build
+            patchelf
 
       # Tauri's dependency tree is large; without this every release build
       # compiles it from scratch on both runners.
