@@ -256,6 +256,8 @@ export interface ReaderPrefs {
   direction: string | null;
   /** Dark surround is easier on the eyes and standard for comic readers. */
   background: "black" | "grey" | "white";
+  /** How a paged turn moves. "none" keeps the old instant swap. */
+  animation: "slide" | "fade" | "none";
 }
 
 const PREFS_KEY = "leaf:reader-prefs";
@@ -265,6 +267,7 @@ export const defaultPrefs = (): ReaderPrefs => ({
   fit: "contain",
   direction: null,
   background: "black",
+  animation: "slide",
 });
 
 export function loadPrefs(): ReaderPrefs {

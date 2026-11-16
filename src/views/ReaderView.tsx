@@ -35,6 +35,9 @@ import { languageName } from "@/lib/api";
 import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
+/** The pan/reset pair a mounted page image lends to the keyboard handler. */
+type ZoomHandle = ReturnType<typeof useImageZoom>["handle"];
+
 interface ReaderViewProps {
   target: ReaderTarget;
   /** Move to another chapter without leaving the reader. */
@@ -60,6 +63,9 @@ const SAVE_DELAY = 600;
 
 /** Pixels a touch must travel across the page before it counts as a turn. */
 const SWIPE_MIN = 50;
+
+/** How far one arrow press scans a zoomed page. */
+const PAN_KEY_STEP = 120;
 
 /**
  * A chapter, flattened to the handful of things the reader draws.
@@ -327,10 +333,80 @@ export function ReaderView({
 
   const step = prefs.mode === "double" ? 2 : 1;
 
+  /**
+   * A page turn in flight, and where it is heading.
+   *
+   * The commit is deferred: while a turn runs, `page` still holds the old
+   * view — fully painted, never re-rastered — and the new view rides in over
+   * it as an overlay. `page` only moves at the end. That ordering is the
+   * whole point: animating the *old* page away (the first attempt) exposed
+   * the new one underneath before its image had painted, so every turn
+   * started with a flash of the incoming page interpolating into place.
+   *
+   * `id` increments per turn so a second one mid-flight remounts the overlay
+   * and restarts the animation instead of being swallowed. Only `advance()`
+   * sets it: the position slider, Home/End and chapter changes jump, and
+   * animating a jump would pretend they turned pages.
+   */
+  const [turn, setTurn] = useState<{ to: number; forward: boolean; id: number } | null>(null);
+
+  // Reduced motion kills the keyframes, and a killed animation fires no
+  // animationend — the turn would only land via the safety timer, showing
+  // the new page faded-in 80ms late. Treated as "none" at the state level
+  // rather than by CSS alone.
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = (event: MediaQueryListEvent) => setReducedMotion(event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  // animationend is the normal commit; this timer is the safety net for the
+  // turn whose animation never reported — an overlay unmounted early by a
+  // mode switch, a tab that slept through the frame. The animation is 180ms,
+  // so 260 never fires while it is still legitimately running.
+  useEffect(() => {
+    if (!turn) return;
+    const timer = window.setTimeout(() => {
+      setPage(turn.to);
+      setTurn(null);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [turn]);
+
+  // A chapter (re)load lands on its own page; an in-flight turn from the
+  // previous one must not commit on top of it.
+  useEffect(() => setTurn(null), [open]);
+
+  /** Jump straight to a page — the slider, Home/End. Not a turn: no overlay,
+   * and any overlay still running is abandoned rather than committed. */
+  const jump = useCallback((at: number) => {
+    setTurn(null);
+    setPage(at);
+  }, []);
+
+  /** The pair indices the given page starts a view with, in screen order. */
+  const pagesAt = useCallback(
+    (start: number): number[] => {
+      if (!open) return [];
+      if (prefs.mode !== "double") return [start];
+      const pair = [start, start + 1].filter((i) => i < open.pages.length);
+      return rtl ? pair.reverse() : pair;
+    },
+    [open, prefs.mode, rtl],
+  );
+
   const advance = useCallback(
     (delta: number) => {
       if (!open) return;
-      const next = page + delta * step;
+      // During a turn the committed page is behind where reading already is:
+      // the new view is mid-animation on top. Fast taps must stack onto the
+      // turn in flight, not re-step from the page underneath it.
+      const here = turn ? turn.to : page;
+      const next = here + delta * step;
 
       if (next < 0) {
         if (open.previous) onNavigate(open.previous);
@@ -340,7 +416,14 @@ export function ReaderView({
         if (open.next) onNavigate(open.next);
         return;
       }
-      setPage(next);
+      // Zooming rides a transform on the image; letting it persist into a
+      // turn would slide a panned crop across the screen as the new page.
+      zoomHandle.current?.reset();
+      if (prefs.mode !== "webtoon" && prefs.animation !== "none" && !reducedMotion) {
+        setTurn((current) => ({ to: next, forward: delta > 0, id: (current?.id ?? 0) + 1 }));
+      } else {
+        setPage(next);
+      }
 
       if (prefs.mode === "webtoon") {
         scroller.current
@@ -348,7 +431,7 @@ export function ReaderView({
           ?.scrollIntoView({ behavior: "auto", block: "start" });
       }
     },
-    [open, page, step, prefs.mode, onNavigate],
+    [open, page, turn, step, prefs.mode, prefs.animation, reducedMotion, onNavigate],
   );
 
   useEffect(() => {
@@ -371,6 +454,19 @@ export function ReaderView({
           advance(rtl ? 1 : -1);
           break;
         case "ArrowDown":
+          if (prefs.mode !== "webtoon") {
+            // While a page is zoomed beyond its box, arrows scan it rather
+            // than turn it: reading a zoomed page means looking at more of it.
+            if (zoomHandle.current?.panByPixels(0, -PAN_KEY_STEP)) {
+              event.preventDefault();
+              break;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              advance(1);
+            }
+          }
+          break;
         case " ":
           if (prefs.mode !== "webtoon") {
             event.preventDefault();
@@ -379,17 +475,21 @@ export function ReaderView({
           break;
         case "ArrowUp":
           if (prefs.mode !== "webtoon") {
+            if (zoomHandle.current?.panByPixels(0, PAN_KEY_STEP)) {
+              event.preventDefault();
+              break;
+            }
             event.preventDefault();
             advance(-1);
           }
           break;
         case "Home":
           event.preventDefault();
-          setPage(0);
+          jump(0);
           break;
         case "End":
           event.preventDefault();
-          setPage(Math.max(0, total - 1));
+          jump(Math.max(0, total - 1));
           break;
       }
     };
@@ -400,6 +500,15 @@ export function ReaderView({
 
   // Where a touch started, and whether the gesture that just ended was a swipe
   // rather than a tap. Refs because neither ever needs to paint anything.
+  const turnByDrag = useCallback(
+    (dx: number) => {
+      // Dragging left pulls the next page in from the right, which is the
+      // previous page in a right-to-left book.
+      advance(dx < 0 ? (rtl ? -1 : 1) : rtl ? 1 : -1);
+    },
+    [advance, rtl],
+  );
+
   /** Translations the source has, fetched when the settings panel is opened. */
   const [translations, setTranslations] = useState<string[]>([]);
   const [switching, setSwitching] = useState(false);
@@ -413,6 +522,22 @@ export function ReaderView({
 
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  /** The outgoing page during a turn animates but reads nothing, so its
+   * handle lands here — a ref the keyboard never consults. */
+  const ghostHandle = useRef<ZoomHandle | null>(null);
+  /**
+   * The zoom handle of whichever page image is currently mounted. In paged
+   * and double mode at most two images exist and only one can be zoomed, so
+   * "the last one registered" is always the one arrows should pan. Kept as a
+   * ref that PageImage clears on unmount (and re-claims when another mounts),
+   * so leaving the paged layouts can't leave the arrows panning a corpse.
+   */
+  const zoomHandle = useRef<ZoomHandle | null>(null);
+  /** Where a mouse button went down. WebView synthesises no touch events from
+   * a mouse, so without this a drag ends as a plain click at the release
+   * point — which turns the page by *where the finger lifted*, the one thing
+   * a drag never reads as. */
+  const mouseDown = useRef<{ x: number; y: number } | null>(null);
 
   /**
    * Read this same chapter in another translation.
@@ -481,13 +606,11 @@ export function ReaderView({
         ? "bg-neutral-800"
         : "bg-black";
 
-  const visible = useMemo(() => {
-    if (!open) return [];
-    if (prefs.mode !== "double") return [page];
-    // Facing pair. In a right-to-left book the earlier page sits on the right.
-    const pair = [page, page + 1].filter((i) => i < open.pages.length);
-    return rtl ? pair.reverse() : pair;
-  }, [open, page, prefs.mode, rtl]);
+  const visible = useMemo(() => pagesAt(page), [pagesAt, page]);
+
+  // The incoming view during a turn: the pages the overlay carries. The old
+  // view stays underneath, committed and painted, until the end commits.
+  const turning = useMemo(() => (turn ? pagesAt(turn.to) : []), [turn, pagesAt]);
 
   // Loading and failure both need the way out. Being unable to leave a screen
   // that will never finish is worse than the thing that went wrong.
@@ -643,9 +766,31 @@ export function ReaderView({
             // thumb on a tap moves a few pixels in every direction.
             if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy)) return;
             swiped.current = true;
-            // Dragging left pulls the next page in from the right, which is the
-            // previous page in a right-to-left book.
-            advance(dx < 0 ? (rtl ? -1 : 1) : rtl ? 1 : -1);
+            turnByDrag(dx);
+          }}
+          onMouseDown={(event) => {
+            // The zoom hook claims the press whenever there is something to
+            // pan — original-size fit at scale 1 included — and says so by
+            // preventDefault-ing the mousedown before it bubbles here. That
+            // press is a pan, not a swipe, and must not also turn the page.
+            if (event.defaultPrevented || event.button !== 0) {
+              mouseDown.current = null;
+              return;
+            }
+            mouseDown.current = { x: event.clientX, y: event.clientY };
+          }}
+          onMouseUp={(event) => {
+            const from = mouseDown.current;
+            mouseDown.current = null;
+            if (!from) return;
+            const dx = event.clientX - from.x;
+            const dy = event.clientY - from.y;
+            if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy)) return;
+            // The zoom hook ends its own pan with a click that stops
+            // propagation, so a consumed gesture never reaches this click
+            // handler — and the flag below is what keeps it from firing.
+            swiped.current = true;
+            turnByDrag(dx);
           }}
         >
           {visible.map((index) => (
@@ -655,8 +800,51 @@ export function ReaderView({
               online={open.online}
               fit={prefs.fit}
               paired={prefs.mode === "double" && visible.length > 1}
+              handleRef={zoomHandle}
             />
           ))}
+
+          {turn && turning.length > 0 && prefs.animation !== "none" && (
+            <div
+              // Keyed by turn id: a second turn mid-flight remounts the
+              // overlay and the animation starts over instead of carrying
+              // on. The images cost nothing to rebuild — preloaded pages
+              // hit the decode cache synchronously on mount. pointer-
+              // events-none and a dead handle ref: this page is arriving,
+              // not yet being read or panned.
+              key={turn.id}
+              onAnimationEnd={(event) => {
+                // The wrapper's own animation, not the images' (which
+                // inherit none of it, but a nested transition would).
+                if (event.target !== event.currentTarget) return;
+                setPage(turn.to);
+                setTurn(null);
+              }}
+              className={cn(
+                "pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden",
+                // Forward in a left-to-right book: the new page rides in
+                // from the right. RTL mirrors it. A fade turns the entry
+                // side into a crossfade over the page underneath.
+                prefs.animation === "fade"
+                  ? "turn-fade"
+                  : turn.forward !== rtl
+                    ? "turn-enter-right"
+                    : "turn-enter-left",
+              )}
+            >
+              {turning.map((index) => (
+                <PageImage
+                  key={open.pages[index]}
+                  source={open.pages[index]}
+                  online={open.online}
+                  fit={prefs.fit}
+                  paired={prefs.mode === "double" && turning.length > 1}
+                  handleRef={ghostHandle}
+                  bare
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -677,7 +865,7 @@ export function ReaderView({
             min={0}
             max={Math.max(0, total - 1)}
             value={page}
-            onChange={(e) => setPage(Number(e.target.value))}
+            onChange={(e) => jump(Number(e.target.value))}
             className={cn(
               "h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 accent-primary",
               rtl && "[direction:rtl]",
@@ -730,11 +918,17 @@ function PageImage({
   online,
   fit,
   paired,
+  handleRef,
+  bare,
 }: {
   source: string;
   online: boolean;
   fit: FitMode;
   paired: boolean;
+  /** Claims this image's pan handle for the arrow keys while it is mounted. */
+  handleRef: React.MutableRefObject<ZoomHandle | null>;
+  /** A turn ghost: rendered for the animation only, never keyboard-visible. */
+  bare?: boolean;
 }) {
   const t = useT();
   const zoom = useImageZoom<HTMLImageElement>();
@@ -745,6 +939,18 @@ function PageImage({
   // three times wider than the screen — blurred, cropped to its middle, and
   // already below the zoom's floor, so it looks stuck zoomed in.
   const [nativeWidth, setNativeWidth] = useState<number | null>(null);
+
+  // The keyboard arrows pan whichever image is actually zoomed or panned,
+  // not merely mounted: in double mode both pages register otherwise, and
+  // the last one mounted would swallow arrows aimed at the first. A ghost
+  // never registers at all — it is mid-exit and inert.
+  useEffect(() => {
+    if (bare || !zoom.moved) return;
+    handleRef.current = zoom.handle;
+    return () => {
+      if (handleRef.current === zoom.handle) handleRef.current = null;
+    };
+  }, [zoom.moved, zoom.handle, handleRef]);
 
   useEffect(() => {
     const hit = cachedPage(source, online);
