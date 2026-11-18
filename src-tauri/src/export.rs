@@ -41,6 +41,22 @@ struct InstallArgs {
     path: String,
 }
 
+/// What `SharePlugin.kt`'s `readUri` answers: the picked file's display name
+/// and its text, capped there.
+#[cfg(target_os = "android")]
+#[derive(serde::Deserialize)]
+struct PickedFile {
+    name: String,
+    content: String,
+}
+
+#[cfg(target_os = "android")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadUriArgs {
+    uri: String,
+}
+
 /// Hand a downloaded APK to Android's installer. See `update.rs`.
 ///
 /// Lives here because the Kotlin side is the same plugin: both are "give this
@@ -52,6 +68,30 @@ pub async fn install_apk<R: Runtime>(app: &AppHandle<R>, path: String) -> Result
         .0
         .run_mobile_plugin::<()>("installApk", InstallArgs { path })
         .map_err(|e| e.to_string())
+}
+
+/// Read a file the system dialog handed back as a `content://` URI.
+///
+/// The Rust side has no way to open() such a URI — only the activity's
+/// ContentResolver, holding the read grant the picker attached to its result,
+/// can — so the bytes come through the same plugin that owns the share sheet.
+/// Returns `(display name, text)`.
+#[cfg(target_os = "android")]
+pub fn read_picked_file<R: Runtime>(app: &AppHandle<R>, uri: &str) -> Result<(String, String), String> {
+    let share = app.state::<Share<R>>();
+    let picked = share
+        .0
+        .run_mobile_plugin::<PickedFile>("readUri", ReadUriArgs { uri: uri.into() })
+        .map_err(|e| e.to_string())?;
+    Ok((picked.name, picked.content))
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn read_picked_file<R: Runtime>(
+    _app: &AppHandle<R>,
+    _uri: &str,
+) -> Result<(String, String), String> {
+    Err("content URIs only exist on Android".into())
 }
 
 /// Registers the Kotlin side. A no-op plugin elsewhere, so `lib.rs` stays free
