@@ -17,7 +17,7 @@ import {
   type ScriptState,
   type UserScript,
 } from "@/lib/api";
-import { canPickFolders } from "@/lib/platform";
+import { canInstallExtensions } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 interface ExtensionsViewProps {
@@ -37,7 +37,7 @@ export function ExtensionsView({ onError }: ExtensionsViewProps) {
   const t = useT();
   const [scripts, setScripts] = useState<UserScript[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const pickers = canPickFolders;
+  const picker = canInstallExtensions;
 
   const reload = useCallback(async () => {
     try {
@@ -108,10 +108,11 @@ export function ExtensionsView({ onError }: ExtensionsViewProps) {
         <Button variant="outline" size="icon" onClick={() => void reload()}>
           <RefreshCw />
         </Button>
-        {/* Picking a file from anywhere needs a real filesystem browser;
-            on Android the folder still works — files arrive by USB or the
-            system picker — but the dialog to choose one does not. */}
-        {pickers && (
+        {/* Picking a file works on both platforms — desktop browses the
+            real filesystem, Android's system dialog answers with a
+            content:// URI the backend reads through the share plugin. The
+            trust gate downstream is identical either way. */}
+        {picker && (
           <Button onClick={() => void addOrUpdate()}>
             <FilePlus2 />
             {t("extensionsView.add")}
@@ -137,7 +138,7 @@ export function ExtensionsView({ onError }: ExtensionsViewProps) {
                 key={s.file}
                 script={s}
                 busy={busy === s.file}
-                canPickFolders={canPickFolders}
+                canInstall={picker}
                 t={t}
                 onApprove={() => void act(s.file, () => approveExtension(s.fingerprint))}
                 onDevelop={() => void act(s.file, () => setExtensionDev(s.file, true))}
@@ -162,7 +163,7 @@ export function ExtensionsView({ onError }: ExtensionsViewProps) {
 interface RowProps {
   script: UserScript;
   busy: boolean;
-  canPickFolders: boolean;
+  canInstall: boolean;
   t: ReturnType<typeof useT>;
   onApprove: () => void;
   onDevelop: () => void;
@@ -184,7 +185,7 @@ const STATE_TONE: Record<ScriptState, string> = {
 function Row({
   script: s,
   busy,
-  canPickFolders: pickers,
+  canInstall: picker,
   t,
   onApprove,
   onDevelop,
@@ -258,7 +259,7 @@ function Row({
             </Button>
           </>
         )}
-        {pickers && s.state !== "broken" && (
+        {picker && s.state !== "broken" && (
           <Button size="sm" variant="ghost" onClick={onUpdate} disabled={busy}>
             <RefreshCw />
             {t("extensionsView.update")}

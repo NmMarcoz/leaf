@@ -77,12 +77,17 @@ fn extension_name(file: &str) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Copy a script the user picked (from the file dialog, so a real path
-/// anywhere) into the extensions folder.
+/// Copy a script the user picked into the extensions folder.
+///
+/// `source_path` is either a real filesystem path (desktop dialog) or an
+/// Android `content://` URI (the system file picker's result, which is never
+/// a path). Both arrive as one string so the frontend dialog needs no
+/// platform branch; only the read differs.
 ///
 /// `as_name` renames on the way in — how "Update" overwrites an existing
 /// entry with a newer file the author sent under some download name. With
-/// `None` the file keeps its own name.
+/// `None` the file keeps its own name: on Android that is the URI's display
+/// name, which is the closest thing a content URI has to one.
 ///
 /// Copying in does not enable: the new bytes are unapproved, so the row
 /// lands as pending (or stays dev if that file was already in dev — its
@@ -95,15 +100,31 @@ pub async fn install_extension(
     as_name: Option<String>,
 ) -> Result<String, String> {
     blocking(move || {
-        let source = std::path::Path::new(&source_path);
-        if source.extension().and_then(|e| e.to_str()) != Some("lua") {
-            return Err(anyhow!("choose a .lua file"));
-        }
+        // A picked URI and a picked path are two spellings of one question —
+        // "what are the bytes and what are they called" — answered once here
+        // so every step below is scheme-blind.
+        let (name_hint, text) = if source_path.starts_with("content://") {
+            crate::export::read_picked_file(&app, &source_path).map_err(anyhow::Error::msg)?
+        } else {
+            let source = std::path::Path::new(&source_path);
+            if source.extension().and_then(|e| e.to_str()) != Some("lua") {
+                return Err(anyhow!("choose a .lua file"));
+            }
+            let name = source
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .ok_or_else(|| anyhow!("picked file has no name"))?;
+            (
+                name,
+                std::fs::read_to_string(source)
+                    .map_err(|e| anyhow!("reading {}: {e}", source.display()))?,
+            )
+        };
+
         // Read through the registry's own loader before saving: a file that
         // will not parse is rejected here rather than landing in the folder
-        // as another broken row.
-        let text = std::fs::read_to_string(source)
-            .map_err(|e| anyhow!("reading {}: {e}", source.display()))?;
+        // as another broken row. This is also the .lua filter's real edge —
+        // a content URI has no trustworthy extension to check.
         leaf_extensions::lua::LuaSource::load(text.clone())
             .map_err(|e| anyhow!("that file is not a working extension: {e:#}"))?;
 
@@ -112,10 +133,10 @@ pub async fn install_extension(
                 extension_name(name)?;
                 name.clone()
             }
-            None => source
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .ok_or_else(|| anyhow!("picked file has no name"))?,
+            None => {
+                extension_name(&name_hint)?;
+                name_hint
+            }
         };
 
         let root = settings::library_root(&app)?;
