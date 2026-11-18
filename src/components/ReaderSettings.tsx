@@ -147,6 +147,25 @@ export function ReaderSettings({
         </section>
 
         <section className="flex flex-col gap-2">
+          <Label className={overline}>{t("readerSettings.animation")}</Label>
+          <div role="radiogroup" className="flex flex-wrap gap-1.5">
+            {([
+              ["slide", "readerSettings.animationSlide"],
+              ["fade", "readerSettings.animationFade"],
+              ["none", "readerSettings.animationNone"],
+            ] as const).map(([value, key]) => (
+              <Chip
+                key={value}
+                selected={prefs.animation === value}
+                onClick={() => onChange({ animation: value })}
+              >
+                {t(key)}
+              </Chip>
+            ))}
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-2">
           <Label className={overline}>{t("readerSettings.background")}</Label>
           <div role="radiogroup" className="flex flex-wrap gap-1.5">
             {(["black", "grey", "white"] as const).map((shade) => (

@@ -158,3 +158,33 @@
   0% { transform: translateX(-100%); }
   100% { transform: translateX(250%); }
 }
+
+/* Page turns. The incoming page rides in *over* the page still on screen —
+   the old one stays committed during the animation, so every pixel shown is
+   a fully decoded, fully painted image. A keyframe per entry direction
+   because the mapping from turn direction to screen direction happens in
+   ReaderView, where the reading direction is known. */
+@keyframes turn-enter-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes turn-enter-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes turn-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.turn-enter-right { animation: turn-enter-right 180ms ease-out; }
+.turn-enter-left { animation: turn-enter-left 180ms ease-out; }
+.turn-fade { animation: turn-fade 150ms ease-in; }
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-enter-right,
+  .turn-enter-left,
+  .turn-fade {
+    animation: none;
+  }
+}
