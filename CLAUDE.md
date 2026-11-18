@@ -382,26 +382,44 @@ there while looking fine in desktop EPUB readers.
 - **Bump, tag and build happen in one run on purpose.** A tag pushed with
   `GITHUB_TOKEN` does not trigger another workflow, so the obvious "tag here,
   build over there" split silently produces no release at all.
-- Releases publish immediately, so the `check` job (tests, frontend build,
-  `clippy -D warnings`) gates the tag rather than following it. Tagging first and
-  failing after leaves a pushed tag with no release.
-- **The platform matrix runs `max-parallel: 1` on purpose.** tauri-action creates
-  the release when it cannot find one for the tag, so running the platforms
-  together means both look at once, both find nothing, and both create one —
-  two release objects on one tag, half the installers on each, and a
-  `latest.json` naming only whichever won. v1.8.0 did this, 0.7s apart, and
-  Windows silently got no installer and no update. Serialised, the second job
-  finds the first one's release and merges into its `latest.json`.
+- The `check` job (tests, frontend build, `clippy -D warnings`) gates the tag
+  rather than following it. Tagging first and failing after leaves a pushed tag
+  with no release.
+- **The release is made once, as a draft, before anything builds**
+  (`create-release`), and **published once, last** (`publish`). Everything in
+  between — the three desktop builds, Android, and the Windows/macOS tests —
+  runs in parallel and only uploads to the draft.
+  - The platforms used to run `max-parallel: 1` because tauri-action creates
+    the release when it cannot find one: together, both found nothing and both
+    created one. v1.8.0 did this, 0.7s apart, and Windows silently got no
+    installer and no update. Creating it up front removes that race.
+  - The second race was `latest.json`: each runner downloaded it, merged its
+    platform in and re-uploaded, so parallel runners lost each other's
+    entries. The builds now run with `includeUpdaterJson: false`, and
+    `publish` writes the file once with `scripts/latest-json.py`, which
+    reproduces tauri-action's format (checked against v1.0.0's real file).
+  - Publishing last means the updater never sees a release whose
+    `latest.json` is missing a platform. `publish` also refuses to go ahead if
+    any desktop key is absent.
+  - Per-platform tests gate `publish`, not the tag. A Windows-only failure
+    leaves a pushed tag and an invisible draft; re-running the workflow reuses
+    that draft (it is found by listing — `releases/tags/…` cannot see drafts).
+- `rust-cache` runs with `cache-on-failure: true`. A run of failures is exactly
+  when CI gets re-run, and without it every retry is the cold 45-minute one.
 - The APK is attached with `gh release upload`, not an action. softprops takes
   the tag it updates from `github.ref`, which on a `workflow_dispatch` run is
   `refs/heads/main` — it finds the release and then fails trying to rename it to
   a branch.
 - Running the workflow with an empty version builds installers as artifacts and
   releases nothing — use it to test CI changes.
-- `updaterJsonPreferNsis: true` in the workflow is load-bearing. Both a `.msi`
-  and an NSIS `.exe` are built, and tauri-action otherwise points `latest.json`
-  at the `.msi`, whose installer needs elevation and so prompts for UAC on every
-  update.
+- **Update `.github/whats-new.md` before every release.** Its first line is a
+  one-sentence summary: it is the update card's notes on desktop (`latest.json`)
+  and leads the release body, which the Android card reads. Download
+  instructions live in `.github/release-notes.md` and follow it on the release
+  page only.
+- The NSIS `.exe` is what `latest.json` points Windows at, not the `.msi`
+  (`latest-json.py` gives it priority, as `updaterJsonPreferNsis` did). The
+  `.msi`'s installer needs elevation and so prompts for UAC on every update.
 - `createUpdaterArtifacts: true` in `tauri.conf.json` is what produces the `.sig`
   files. Without it the release builds fine and updates silently never work.
 - macOS ships a universal binary (`--target universal-apple-darwin`), so the
@@ -545,8 +563,8 @@ CI runs the same script, which is the point of it being a script: the release
 job sets `LEAF_KEYSTORE*` from repository secrets and nothing about how a
 build is signed differs between a runner and a laptop. The APK is arm64 only —
 building the other three ABIs would triple the job for an APK nobody installs —
-and it is attached to the release the desktop job already created, which is why
-`android` needs `build` rather than running beside it.
+and it is attached to the draft `create-release` made, which is why `android`
+runs beside the desktop builds rather than after them.
 
 ## Style
 

@@ -1,7 +1,7 @@
 import { Download, Loader2, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { isAndroid, isMobile } from "@/lib/platform";
+import { isMobile } from "@/lib/platform";
 import { Progress } from "@/components/ui/progress";
 import type { UpdateState } from "@/hooks/useUpdater";
 import { formatBytes } from "@/lib/api";
@@ -89,17 +89,20 @@ export function UpdateBanner({
               {t("updateBanner.available", { version: state.version ?? "" })}
             </p>
             {/* An error here is not a dead end — it is usually "allow installs
-                from this app first", and the offer is still good. Notes are the
-                release body, which on Android is desktop download instructions
-                and not worth the line. */}
+                from this app first", and the offer is still good. Notes lead
+                with what changed (.github/whats-new.md, first line a summary),
+                so three lines are enough to say why the update is worth it;
+                the full text is in the tooltip. */}
             {state.error ? (
               <p className="text-[11px] text-amber-500" title={state.error}>
                 {state.error}
               </p>
             ) : (
-              !isAndroid &&
               state.notes && (
-                <p className="truncate text-[11px] text-muted-foreground" title={state.notes}>
+                <p
+                  className="line-clamp-3 whitespace-pre-line text-[11px] text-muted-foreground"
+                  title={state.notes}
+                >
                   {state.notes}
                 </p>
               )
