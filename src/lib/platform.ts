@@ -18,6 +18,17 @@ export const isIOS = /iphone|ipad|ipod/i.test(ua);
 export const isMobile = isAndroid || isIOS;
 
 /**
+ * Whether a file can be picked from anywhere and read by the app.
+ *
+ * Desktop browses the real filesystem. Android's file dialog answers with a
+ * `content://` URI rather than a path — no folder browsing, no arbitrary
+ * reads — but the app can still read the bytes the user just chose (the
+ * picker's grant travels with the URI; see `export.rs`). Enough for
+ * importing an extension script, which is what asks for it.
+ */
+export const canInstallExtensions = true;
+
+/**
  * Whether the user can point the app at an arbitrary folder.
  *
  * Android sandboxes app storage; reaching outside it needs the document picker

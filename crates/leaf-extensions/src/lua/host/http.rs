@@ -59,6 +59,16 @@ fn request(
     let referer: Option<String> = opts
         .as_ref()
         .and_then(|o| o.get::<Option<String>>("referer").ok().flatten());
+    // `opts.headers` = extra request headers, applied over the defaults.
+    // Some sites key their whole API on a marker header (a scan-group id,
+    // an app signature) that no UA/Accept/Referer combination substitutes
+    // for; this is still one door behind origin pinning, so which bytes go
+    // on the wire is the script's business.
+    let headers: Vec<(String, String)> = opts
+        .as_ref()
+        .and_then(|o| o.get::<Option<Table>>("headers").ok().flatten())
+        .map(|t| t.pairs::<String, String>().filter_map(|p| p.ok()).collect())
+        .unwrap_or_default();
 
     // One agent per call: it carries the guarded resolver, and building it is
     // cheap next to the request it is about to make.
@@ -78,7 +88,7 @@ fn request(
             )));
         }
 
-        let built = apply_headers(&agent, &method, &url, referer.as_deref())
+        let built = apply_headers(&agent, &method, &url, referer.as_deref(), &headers)
             .timeout(Duration::from_secs(20));
 
         let response = match &payload {
@@ -137,12 +147,14 @@ fn request(
 
 /// The header set `leaf_fetch::download::build_request` applies, ported onto
 /// the guarded agent so a script's requests present the same User-Agent as
-/// the downloader's — one scraper identity, two doors.
+/// the downloader's — one scraper identity, two doors. `extra` are the
+/// script's own `opts.headers`, applied last so it can override even these.
 fn apply_headers(
     agent: &ureq::Agent,
     method: &str,
     url: &str,
     referer: Option<&str>,
+    extra: &[(String, String)],
 ) -> ureq::Request {
     let mut request = agent
         .request(method, url)
@@ -153,6 +165,9 @@ fn apply_headers(
         if let Some(origin) = origin_of(referer) {
             request = request.set("Origin", &origin);
         }
+    }
+    for (name, value) in extra {
+        request = request.set(name, value);
     }
     request
 }
