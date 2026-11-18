@@ -4,14 +4,18 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 
 @InvokeArg
 class ShareArgs {
@@ -24,8 +28,13 @@ class InstallArgs {
   lateinit var path: String
 }
 
+@InvokeArg
+class ReadUriArgs {
+  lateinit var uri: String
+}
+
 /**
- * Handing a built volume to another app.
+ * Getting files in and out of the app when no filesystem path exists.
  *
  * This is what "export" means on Android. A phone has no file manager the app
  * can drop a volume into and no Send to Kindle to mail it with, and the export
@@ -36,6 +45,12 @@ class InstallArgs {
  * The URI is a `content://` one from the FileProvider already declared in the
  * manifest. Handing out a `file://` path instead throws `FileUriExposedException`
  * on anything since Android 7.
+ *
+ * `readUri` is the reverse door — a file the user picked in a system dialog
+ * arrives as a `content://` URI, which is readable through the ContentResolver
+ * but is not a path, so nothing on the Rust side can just open() it. Both
+ * directions live in one plugin because both are "the system knows where the
+ * bytes are, not us".
  */
 @TauriPlugin
 class SharePlugin(private val activity: Activity) : Plugin(activity) {
@@ -126,5 +141,71 @@ class SharePlugin(private val activity: Activity) : Plugin(activity) {
       },
     )
     invoke.resolve()
+  }
+
+  /**
+   * Read a user-picked file whose location is a `content://` URI.
+   *
+   * The callers pass what the system file dialog returned; the read grant that
+   * dialog attaches to its result is exactly the permission being used here,
+   * so nothing else needs to be asked for. The size cap is what says this
+   * stays the "pick a script" door and not a way to slurp an arbitrary
+   * document through IPC — a Lua source is a few tens of KB, and the one
+   * caller on the Rust side re-validates the bytes as a script anyway.
+   */
+  @Command
+  fun readUri(invoke: Invoke) {
+    val args = invoke.parseArgs(ReadUriArgs::class.java)
+
+    val uri = Uri.parse(args.uri)
+    val name = displayName(uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "picked"
+
+    val bytes = try {
+      activity.contentResolver.openInputStream(uri)?.use { input ->
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(8 * 1024)
+        var read = input.read(buffer)
+        while (read != -1) {
+          out.write(buffer, 0, read)
+          if (out.size() > MAX_READ_BYTES) {
+            throw IOException("larger than ${(MAX_READ_BYTES / 1024)} KB")
+          }
+          read = input.read(buffer)
+        }
+        out.toByteArray()
+      } ?: throw IOException("no readable stream for $uri")
+    } catch (e: Exception) {
+      invoke.reject("reading $name: ${e.message}")
+      return
+    }
+
+    val result = JSObject()
+    result.put("name", name)
+    // UTF-8 with replacement: the caller treats anything that is not a Lua
+    // script as a bad pick, and a decode failure here must read as that
+    // rather than crash the plugin thread.
+    result.put("content", String(bytes, Charsets.UTF_8))
+    invoke.resolve(result)
+  }
+
+  /** The name the source app knows the file by (Downloads, Drive, ...); the
+   * `content://` URI itself never carries a usable filename. */
+  private fun displayName(uri: Uri): String? {
+    if (uri.scheme != "content") return null
+    return try {
+      activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor ->
+          if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null
+        }
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  companion object {
+    /** A Lua source script is text of a few tens of KB. 2 MB is already 100×
+     * the largest one that could exist and still load under the sandbox's own
+     * per-call timeout. */
+    private const val MAX_READ_BYTES = 2 * 1024 * 1024
   }
 }
