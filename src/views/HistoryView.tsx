@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, Clock, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Clock, Loader2, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +31,8 @@ interface HistoryViewProps {
    */
   onRead: (entry: HistoryEntry) => void;
   onOpenSeries: (id: number) => void;
+  /** Back to the shelf, which history now lives under. */
+  onBack: () => void;
   onError: (message: string | null) => void;
 }
 
@@ -38,7 +40,7 @@ interface HistoryViewProps {
 const LIMIT = 100;
 
 /** What you were reading, most recent first. */
-export function HistoryView({ onRead, onOpenSeries, onError }: HistoryViewProps) {
+export function HistoryView({ onRead, onOpenSeries, onBack, onError }: HistoryViewProps) {
   const t = useT();
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
   const [clearing, setClearing] = useState(false);
@@ -79,26 +81,30 @@ export function HistoryView({ onRead, onOpenSeries, onError }: HistoryViewProps)
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-card/60 px-5 py-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-sm font-semibold">{t("historyView.title")}</h1>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {t("historyView.subtitle")}
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={refresh}>
-          {t("historyView.refresh")}
+    <div className="scrollbar-thin h-full overflow-y-auto">
+      <div className="mx-auto flex max-w-[880px] flex-col gap-6 px-5 pb-10 pt-6 sm:px-10 sm:pt-8">
+      <header className="flex flex-col gap-4">
+        <Button variant="ghost" size="sm" className="-ml-3 self-start" onClick={onBack}>
+          <ArrowLeft />
+          {t("historyView.back")}
         </Button>
-        {entries !== null && entries.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={() => setClearing(true)}>
-            <Trash2 />
-            {t("historyView.clear")}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="type-display max-sm:text-[32px] max-sm:leading-9">
+              {t("historyView.title")}
+            </h1>
+            <p className="mt-1 text-sm text-text-secondary">{t("historyView.subtitle")}</p>
+          </div>
+          {entries !== null && entries.length > 0 && (
+            <Button variant="ghost" onClick={() => setClearing(true)}>
+              <Trash2 />
+              {t("historyView.clear")}
+            </Button>
+          )}
+        </div>
       </header>
 
-      <main className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5">
+      <main>
         {entries === null ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" /> {t("historyView.loading")}
@@ -112,7 +118,7 @@ export function HistoryView({ onRead, onOpenSeries, onError }: HistoryViewProps)
             </p>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-2">
+          <div className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-raised">
             {entries.map((entry) => (
               <Row
                 key={`${entry.series_id}-${entry.chapter}-${entry.opened_at}`}
@@ -125,6 +131,7 @@ export function HistoryView({ onRead, onOpenSeries, onError }: HistoryViewProps)
           </div>
         )}
       </main>
+      </div>
 
       {/* Nothing here can be undone and nothing here is a file, so the warning
           is about what is lost rather than about danger: the reading positions. */}
@@ -170,7 +177,7 @@ function Row({
   return (
     <div
       ref={ref}
-      className="group flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3"
+      className="group flex items-center gap-4 px-4 py-3"
     >
       <div className="flex h-[62px] w-[44px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/40">
         {url ? (
@@ -181,8 +188,8 @@ function Row({
       </div>
 
       <button onClick={onOpenSeries} className="flex min-w-0 flex-1 flex-col gap-1 text-left">
-        <p className="truncate text-xs font-medium">{entry.series_title}</p>
-        <p className="truncate text-[11px] text-muted-foreground">
+        <p className="truncate text-sm font-medium">{entry.series_title}</p>
+        <p className="truncate text-xs text-text-secondary">
           {t("historyView.entrySubtitle", {
             chapter: entry.chapter,
             status: entry.finished
@@ -195,9 +202,9 @@ function Row({
           })}
         </p>
         {!entry.finished && (
-          <div className="mt-0.5 h-0.5 w-full max-w-48 rounded-full bg-muted">
+          <div className="mt-0.5 h-1 w-full max-w-48 rounded-full bg-sunken">
             <div
-              className="h-full rounded-full bg-primary/70"
+              className="h-full rounded-full bg-strong"
               style={{ width: `${Math.min(100, progress)}%` }}
             />
           </div>

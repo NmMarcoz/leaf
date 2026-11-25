@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { ChevronRight, Globe, Loader2, Plus } from "lucide-react";
 
 import { SeriesDetail, type TitleChoice } from "@/components/SeriesDetail";
 import { SeriesSearch } from "@/components/SeriesSearch";
@@ -21,6 +21,8 @@ interface AddSeriesDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdded: (series: Series) => void;
+  /** "Not it?" — hand over to searching one extension's own catalogue. */
+  onSearchExtensions?: () => void;
 }
 
 /**
@@ -29,7 +31,12 @@ interface AddSeriesDialogProps {
  * Adding also pulls the published volume layout, which is what turns the
  * library from a list of files into something that can say what is missing.
  */
-export function AddSeriesDialog({ open, onOpenChange, onAdded }: AddSeriesDialogProps) {
+export function AddSeriesDialog({
+  open,
+  onOpenChange,
+  onAdded,
+  onSearchExtensions,
+}: AddSeriesDialogProps) {
   const [session, setSession] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SeriesMatch | null>(null);
@@ -124,13 +131,32 @@ export function AddSeriesDialog({ open, onOpenChange, onAdded }: AddSeriesDialog
           </div>
         </DialogBody>
 
-        <DialogFooter error={error}>
+        <DialogFooter
+          error={error}
+          hint={
+            onSearchExtensions && (
+              <button
+                onClick={onSearchExtensions}
+                className="flex items-center gap-2.5 rounded-lg border border-dashed border-line-strong px-3 py-2 text-left transition-colors hover:bg-hover"
+              >
+                <Globe className="size-4 shrink-0 text-text-secondary" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-xs font-medium">Not it?</span>
+                  <span className="truncate text-[11px] text-text-secondary">
+                    Search one extension's catalogue
+                  </span>
+                </span>
+                <ChevronRight className="size-3.5 shrink-0 text-text-secondary" />
+              </button>
+            )
+          }
+        >
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button onClick={() => void add()} disabled={!selected || adding}>
             {adding ? <Loader2 className="animate-spin" /> : <Plus />}
-            Add to library
+            Add to shelf
           </Button>
         </DialogFooter>
       </DialogContent>

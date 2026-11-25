@@ -1,14 +1,64 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@fontsource-variable/fredoka";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/space-grotesk";
 
 @custom-variant dark (&:is(.dark *));
 
-/* Mirrors the "Color" collection in the Figma library: the same names, Light
-   here and Dark under `.dark`. The brand colours never change with the theme;
-   the semantic ones are built from them. Green leads in light mode and orange
-   in dark, so the red of the beak is left free to mean "destructive". */
+/* "Papel & Nanquim" — the v2 colour collection in Figma (page "Redesign · v2"),
+   Light here and Dark under `.dark`, with the Figma names kept as the variable
+   names so a value can be checked against the file by searching for it.
+
+   Three rules from the design that the names encode:
+   - Paper is the page, ink is the chrome: the sidebar and the primary button
+     are `ink`, not a brand colour.
+   - `accent` (the toucan's beak) is only for delivering a volume. Anything
+     else that wants to stand out uses ink.
+   - Status has its own colours, each with a `-soft` fill for chips:
+     warning = missing, info = generated, success = on the device, danger = failed.
+
+   The shadcn names below (`--primary`, `--muted`…) are mapped onto these, so
+   components written against them follow the redesign without knowing it. */
 :root {
+  --bg-canvas: #f4efe4;
+  --bg-raised: #fbf8f1;
+  --bg-sunken: #eae3d3;
+  --bg-hover: #efe8da;
+  --bg-pressed: #e2d9c7;
+  --line-default: #ddd3c0;
+  --line-strong: #c2b59c;
+  --text-primary: #15171c;
+  --text-secondary: #57544e;
+  --text-tertiary: #6b675f;
+
+  --fg-strong: #14161b;
+  --fg-strong-hover: #23262e;
+  --fg-strong-pressed: #08090c;
+  --fg-on-strong: #f1eadb;
+
+  --bg-ink: #14161b;
+  --bg-ink-raised: #23262e;
+  --text-on-ink: #f1eadb;
+  --text-on-ink-muted: #9a968c;
+
+  --accent-default: #d2401a;
+  --accent-hover: #b9370f;
+  --accent-pressed: #9e2e0c;
+  --accent-soft: #f7ddd2;
+  --accent-on: #fff8ee;
+
+  --status-success: #2e7445;
+  --status-success-soft: #dcead6;
+  --status-info: #2a49b0;
+  --status-info-soft: #dee4f6;
+  --status-warning: #9a5b0b;
+  --status-warning-soft: #f6e6c6;
+  --status-danger: #b4231a;
+  --status-danger-soft: #f6d8d2;
+
+  /* The logo's own colours, which do not change with the theme. */
   --brand-cream: #f2edd5;
   --brand-forest: #04261e;
   --brand-green: #084a24;
@@ -16,52 +66,72 @@
   --brand-red: #e7390d;
 
   --radius: 0.625rem;
-  --background: var(--brand-cream);
-  --foreground: var(--brand-forest);
-  --card: #faf7ea;
-  --card-foreground: var(--brand-forest);
-  --popover: #faf7ea;
-  --popover-foreground: var(--brand-forest);
-  --primary: var(--brand-green);
-  --primary-foreground: var(--brand-cream);
-  --secondary: #e9e2c6;
-  --secondary-foreground: var(--brand-forest);
-  --muted: #e9e2c6;
-  --muted-foreground: #56695d;
-  --accent: #ddd5b3;
-  --accent-foreground: var(--brand-forest);
-  --destructive: var(--brand-red);
-  --destructive-foreground: #faf7ea;
-  --border: rgb(4 38 30 / 12%);
-  --input: rgb(4 38 30 / 20%);
-  --ring: var(--brand-orange);
+  --background: var(--bg-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--bg-raised);
+  --card-foreground: var(--text-primary);
+  --popover: var(--bg-raised);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--fg-strong);
+  --primary-foreground: var(--fg-on-strong);
+  --secondary: var(--bg-sunken);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-sunken);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--bg-hover);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--status-danger);
+  --destructive-foreground: var(--accent-on);
+  --border: var(--line-default);
+  --input: var(--line-strong);
+  --ring: var(--accent-default);
 }
 
+/* Dark is green-black ink rather than grey: the same forest the logo sits on. */
 .dark {
-  --background: #041a15;
-  --foreground: var(--brand-cream);
-  --card: #072821;
-  --card-foreground: var(--brand-cream);
-  --popover: #0a2e26;
-  --popover-foreground: var(--brand-cream);
-  --primary: var(--brand-orange);
-  --primary-foreground: var(--brand-forest);
-  --secondary: #0e372d;
-  --secondary-foreground: var(--brand-cream);
-  --muted: #0e372d;
-  --muted-foreground: #a3b5a8;
-  --accent: #124034;
-  --accent-foreground: var(--brand-cream);
-  --destructive: #f25a33;
-  --destructive-foreground: #faf7ea;
-  --border: rgb(242 237 213 / 10%);
-  --input: rgb(242 237 213 / 14%);
-  --ring: var(--brand-orange);
+  --bg-canvas: #041a15;
+  --bg-raised: #0a2620;
+  --bg-sunken: #021410;
+  --bg-hover: #0e2e27;
+  --bg-pressed: #13372f;
+  --line-default: #173a31;
+  --line-strong: #275247;
+  --text-primary: #ece6d8;
+  --text-secondary: #b4c0ba;
+  --text-tertiary: #85978f;
+
+  --fg-strong: #ece6d8;
+  --fg-strong-hover: #f7f2e6;
+  --fg-strong-pressed: #d6cfbf;
+  --fg-on-strong: #041a15;
+
+  --bg-ink: #010d0a;
+  --bg-ink-raised: #0e2b24;
+  --text-on-ink: #ece6d8;
+  --text-on-ink-muted: #85978f;
+
+  --accent-default: #e8572d;
+  --accent-hover: #f06a42;
+  --accent-pressed: #d04a22;
+  --accent-soft: #3b1a10;
+  --accent-on: #160803;
+
+  --status-success: #5cc07f;
+  --status-success-soft: #0e3524;
+  --status-info: #8da6f5;
+  --status-info-soft: #18265a;
+  --status-warning: #e8ae52;
+  --status-warning-soft: #3a2a0d;
+  --status-danger: #f27b69;
+  --status-danger-soft: #3e1712;
 }
 
 @theme {
-  /* Brand type, for the wordmark and nothing else: the interface stays in
-     the system font so it reads like the platform it runs on. */
+  /* Space Grotesk for titles, Geist for the interface, Geist Mono for numbers
+     and paths. Fredoka is the old wordmark's face and stays for it alone. */
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+  --font-display: "Space Grotesk Variable", "Space Grotesk", "Geist Variable", sans-serif;
   --font-brand: "Fredoka Variable", "Fredoka", ui-rounded, system-ui, sans-serif;
 }
 
@@ -90,6 +160,38 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --color-canvas: var(--bg-canvas);
+  --color-raised: var(--bg-raised);
+  --color-sunken: var(--bg-sunken);
+  --color-hover: var(--bg-hover);
+  --color-pressed: var(--bg-pressed);
+  --color-line: var(--line-default);
+  --color-line-strong: var(--line-strong);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-strong: var(--fg-strong);
+  --color-strong-hover: var(--fg-strong-hover);
+  --color-strong-pressed: var(--fg-strong-pressed);
+  --color-on-strong: var(--fg-on-strong);
+  --color-ink: var(--bg-ink);
+  --color-ink-raised: var(--bg-ink-raised);
+  --color-on-ink: var(--text-on-ink);
+  --color-on-ink-muted: var(--text-on-ink-muted);
+  --color-deliver: var(--accent-default);
+  --color-deliver-hover: var(--accent-hover);
+  --color-deliver-pressed: var(--accent-pressed);
+  --color-deliver-soft: var(--accent-soft);
+  --color-on-deliver: var(--accent-on);
+  --color-success: var(--status-success);
+  --color-success-soft: var(--status-success-soft);
+  --color-info: var(--status-info);
+  --color-info-soft: var(--status-info-soft);
+  --color-warning: var(--status-warning);
+  --color-warning-soft: var(--status-warning-soft);
+  --color-danger: var(--status-danger);
+  --color-danger-soft: var(--status-danger-soft);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -134,6 +236,45 @@
 }
 
 @layer components {
+  /* The v2 type scale. Named after the Figma text styles so a layer's style
+     name is the class to use. */
+  .type-display {
+    font-family: var(--font-display);
+    font-size: 40px;
+    line-height: 44px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+  }
+  .type-title {
+    font-family: var(--font-display);
+    font-size: 24px;
+    line-height: 30px;
+    font-weight: 500;
+    letter-spacing: -1px;
+  }
+  .type-subtitle {
+    font-family: var(--font-display);
+    font-size: 18px;
+    line-height: 24px;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+  }
+  .type-heading {
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  /* Section labels: mono capitals, tracked out. Figma's 6% tracking on 11px. */
+  .type-overline {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
