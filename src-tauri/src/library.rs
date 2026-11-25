@@ -142,9 +142,7 @@ pub async fn library_sync_series(app: AppHandle, id: i64) -> Result<SyncReport, 
             }
             Err(_) => {
                 let registry = crate::sources::load_registry(&app)?;
-                let ext_source = registry
-                    .get(&source)
-                    .ok_or_else(|| anyhow::anyhow!("{source:?} is not a registered source"))?;
+                let ext_source = registry.metadata(&source)?;
                 crate::sources::pull_layout(&mut library, series.id, ext_source.as_ref(), &source_id, &series.title)
             }
         }
@@ -160,7 +158,7 @@ pub async fn library_sync_series(app: AppHandle, id: i64) -> Result<SyncReport, 
 /// the chapter list and re-fetching the blurb are different costs and
 /// different failure modes, and asking for one should not mean waiting on,
 /// or risking, the other. Runs the same fallback chain adding a series does
-/// (`MangaDetails::best_effort`) — the source's own listing first for an
+/// (`Registry::best_effort`) — the source's own listing first for an
 /// extension, MangaDex falling back to Kitsu for the metadata pair, then
 /// AniList, then Jikan for whatever is still blank.
 #[tauri::command]
@@ -186,19 +184,17 @@ pub(crate) fn refetch_metadata(
         _ => anyhow::bail!("{} was added by hand; there is no source to refetch from", series.title),
     };
 
+    let registry = crate::sources::load_registry(app)?;
     let details = if parse_source(&source).is_ok() {
         // MangaDex/Kitsu are themselves the metadata pair, so there is no
-        // source page of their own to try first — just the same
-        // search-then-AniList-then-Jikan chain `best_effort` runs after it.
+        // source page of their own to try first — just the same enrich
+        // chain `best_effort` runs after it.
         let mut details = leaf_extensions::MangaDetails::default();
-        details.fill_from_metadata_search(&series.title);
+        registry.enrich(&mut details, &series.title);
         details
     } else {
-        let registry = crate::sources::load_registry(app)?;
-        let ext_source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow::anyhow!("{source:?} is not a registered source"))?;
-        leaf_extensions::MangaDetails::best_effort(ext_source.as_ref(), &source_id, &series.title)
+        let ext_source = registry.metadata(&source)?;
+        registry.best_effort(ext_source.as_ref(), &source_id, &series.title)
     };
 
     library.set_classification(series.id, &details.tags, details.content_rating.as_deref())?;

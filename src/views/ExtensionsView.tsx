@@ -1,20 +1,41 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { FilePlus2, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  FilePlus2,
+  Loader2,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { Chip } from "@/components/ui/chip";
+import { Input } from "@/components/ui/input";
 import { useT } from "@/lib/i18n";
 import {
+  addExtensionRepo,
   approveExtension,
+  browseExtensionRepo,
   installExtension,
+  installFromExtensionRepo,
+  listExtensionRepos,
   listExtensions,
   lockExtension,
   removeExtension,
+  removeExtensionRepo,
   setExtensionDev,
   setExtensionEnabled,
+  type ExtensionRepo,
+  type RepoBrowse,
+  type RepoRow,
+  type RepoStatus,
   type ScriptState,
+  type SourceKind,
   type UserScript,
 } from "@/lib/api";
 import { canInstallExtensions } from "@/lib/platform";
@@ -26,7 +47,8 @@ interface ExtensionsViewProps {
 
 /**
  * The extensions folder as a list: every `.lua` file, what the trust gate
- * thinks of it, and every action that changes that.
+ * thinks of it, and every action that changes that — plus the repositories
+ * the user added, which only ever put files into that same folder.
  *
  * The Add-from-source dialog shows the *pending queue*; this is the whole
  * folder, including the approved, the off, and the broken — which is the
@@ -151,9 +173,94 @@ export function ExtensionsView({ onError }: ExtensionsViewProps) {
                 onRemove={() => void act(s.file, () => removeExtension(s.file))}
               />
             ))}
+
+            <Repositories t={t} onError={onError} onInstalled={reload} />
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ badges */
+
+const STATE_TONE: Record<ScriptState, string> = {
+  approved: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  dev: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  pending: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  disabled: "bg-muted text-muted-foreground",
+  broken: "bg-red-500/15 text-red-600 dark:text-red-400",
+};
+
+/** A reader is the kind that fetches pages, so it is the one drawn loudest. */
+const KIND_TONE: Record<SourceKind, string> = {
+  metadata: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  enrich: "bg-muted text-muted-foreground",
+  reader: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+};
+
+const BADGE = "border-none px-1.5 py-0 text-[10px] font-semibold uppercase";
+
+function KindBadge({ kind, t }: { kind: SourceKind; t: ReturnType<typeof useT> }) {
+  return (
+    <Chip className={cn(BADGE, KIND_TONE[kind])} title={t(`extensionsView.kindHint.${kind}`)}>
+      {t(`extensionsView.kind.${kind}`)}
+    </Chip>
+  );
+}
+
+/** Name, badges, and the lines saying what the script is and can reach —
+ * shared by an installed row and a repository row, so the two describe a
+ * script the same way. */
+function Describe({
+  name,
+  kind,
+  lang,
+  nsfw,
+  description,
+  baseUrl,
+  mirrors,
+  capabilities,
+  badge,
+  t,
+}: {
+  name: string;
+  kind?: SourceKind;
+  lang?: string;
+  nsfw?: boolean;
+  description?: string | null;
+  baseUrl?: string;
+  mirrors?: string[];
+  capabilities?: string[];
+  badge?: React.ReactNode;
+  t: ReturnType<typeof useT>;
+}) {
+  return (
+    <div className="min-w-0 flex-1">
+      <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+        <span className="truncate">{name}</span>
+        {kind && <KindBadge kind={kind} t={t} />}
+        {badge}
+        {lang && (
+          <Chip className={cn(BADGE, "bg-muted text-muted-foreground")}>{lang}</Chip>
+        )}
+        {nsfw && (
+          <Chip className={cn(BADGE, "bg-red-500/15 text-red-600 dark:text-red-400")}>18+</Chip>
+        )}
+      </p>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      {baseUrl && (
+        <p className="truncate text-xs text-muted-foreground" dir="ltr">
+          {[baseUrl, ...(mirrors ?? [])].join(" · ")}
+        </p>
+      )}
+      {capabilities && capabilities.length > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          {t("extensionsView.can", {
+            what: capabilities.map((c) => t(`extensionsView.capability.${c}`)).join(" · "),
+          })}
+        </p>
+      )}
     </div>
   );
 }
@@ -174,14 +281,6 @@ interface RowProps {
   onRemove: () => void;
 }
 
-const STATE_TONE: Record<ScriptState, string> = {
-  approved: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  dev: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  pending: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  disabled: "bg-muted text-muted-foreground",
-  broken: "bg-red-500/15 text-red-600 dark:text-red-400",
-};
-
 function Row({
   script: s,
   busy,
@@ -198,20 +297,37 @@ function Row({
   const enabled = s.state !== "disabled";
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-border bg-card/60 p-3">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 truncate text-sm font-medium">
-            {s.name ?? s.file}
-            <Chip
-              className={cn("border-none px-1.5 py-0 text-[10px] font-semibold uppercase", STATE_TONE[s.state])}
-            >
-              {t(`extensionsView.state.${s.state}`)}
-            </Chip>
-          </p>
-          <p className="truncate text-xs text-muted-foreground" dir="ltr">
-            {s.base_url ?? s.error}
-          </p>
-        </div>
+      <div className="flex items-start gap-3">
+        {s.state === "broken" ? (
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-2 truncate text-sm font-medium">
+              {s.file}
+              <Chip className={cn(BADGE, STATE_TONE.broken)}>
+                {t("extensionsView.state.broken")}
+              </Chip>
+            </p>
+            <p className="text-xs text-muted-foreground" dir="ltr">
+              {s.error}
+            </p>
+          </div>
+        ) : (
+          <Describe
+            name={s.name ?? s.file}
+            kind={s.kind}
+            lang={s.lang}
+            nsfw={s.nsfw}
+            description={s.description}
+            baseUrl={s.base_url}
+            mirrors={s.mirrors}
+            capabilities={s.capabilities}
+            badge={
+              <Chip className={cn(BADGE, STATE_TONE[s.state])}>
+                {t(`extensionsView.state.${s.state}`)}
+              </Chip>
+            }
+            t={t}
+          />
+        )}
 
         {/* A switch on every live row; a broken file has nothing to enable. */}
         {s.state !== "broken" && (
@@ -235,6 +351,20 @@ function Row({
           </button>
         )}
       </div>
+
+      {/* What approving means for this kind, said where the button is. */}
+      {s.state === "pending" && s.kind && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {t(`extensionsView.kindHint.${s.kind}`)}
+        </p>
+      )}
+      {s.warnings.length > 0 && (
+        <ul className="list-inside list-disc text-[11px] text-muted-foreground">
+          {s.warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {s.state === "pending" && (
@@ -276,6 +406,254 @@ function Row({
           {t("extensionsView.remove")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ repositories */
+
+/**
+ * Repositories the user added by typing an address. The app suggests none
+ * and ships none — an empty list with an address box is the whole default.
+ * Installing from one writes a file into the extensions folder and stops:
+ * the row above then asks for approval like any other new file.
+ */
+function Repositories({
+  t,
+  onError,
+  onInstalled,
+}: {
+  t: ReturnType<typeof useT>;
+  onError: (message: string | null) => void;
+  onInstalled: () => Promise<void>;
+}) {
+  const [repos, setRepos] = useState<ExtensionRepo[]>([]);
+  const [address, setAddress] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      setRepos(await listExtensionRepos());
+    } catch (e) {
+      onError(String(e));
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const add = useCallback(async () => {
+    if (!address.trim()) return;
+    setAdding(true);
+    try {
+      await addExtensionRepo(address.trim());
+      setAddress("");
+      await reload();
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setAdding(false);
+    }
+  }, [address, onError, reload]);
+
+  return (
+    <section className="mt-6 flex flex-col gap-2">
+      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {t("extensionsView.repos.title")}
+      </h2>
+      <p className="text-xs text-muted-foreground">{t("extensionsView.repos.explainer")}</p>
+      <div className="flex items-center gap-2">
+        <Input
+          value={address}
+          placeholder="https://…/index.json"
+          dir="ltr"
+          type="url"
+          inputMode="url"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          onChange={(e) => setAddress(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void add();
+          }}
+        />
+        <Button onClick={() => void add()} disabled={adding || !address.trim()}>
+          {adding ? <Loader2 className="animate-spin" /> : <Plus />}
+          {t("extensionsView.repos.add")}
+        </Button>
+      </div>
+      {repos.map((repo) => (
+        <Repository
+          key={repo.url}
+          repo={repo}
+          t={t}
+          onError={onError}
+          onInstalled={onInstalled}
+          onRemove={async () => {
+            try {
+              await removeExtensionRepo(repo.url);
+              await reload();
+            } catch (e) {
+              onError(String(e));
+            }
+          }}
+        />
+      ))}
+    </section>
+  );
+}
+
+const STATUS_TONE: Record<RepoStatus, string> = {
+  "not-installed": "bg-muted text-muted-foreground",
+  installed: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  "update-available": "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  incompatible: "bg-red-500/15 text-red-600 dark:text-red-400",
+};
+
+function Repository({
+  repo,
+  t,
+  onError,
+  onInstalled,
+  onRemove,
+}: {
+  repo: ExtensionRepo;
+  t: ReturnType<typeof useT>;
+  onError: (message: string | null) => void;
+  onInstalled: () => Promise<void>;
+  onRemove: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [browse, setBrowse] = useState<RepoBrowse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  // Fetched on opening, never on mount: reading a repository is network,
+  // and network is something the user asks for.
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setBrowse(await browseExtensionRepo(repo.url));
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [repo.url, onError]);
+
+  const install = useCallback(
+    async (rows: RepoRow[]) => {
+      for (const row of rows) {
+        setBusy(row.id);
+        try {
+          await installFromExtensionRepo(repo.url, row.id);
+        } catch (e) {
+          onError(String(e));
+        }
+      }
+      setBusy(null);
+      await Promise.all([load(), onInstalled()]);
+    },
+    [repo.url, onError, load, onInstalled],
+  );
+
+  const updates = browse?.rows.filter((r) => r.status === "update-available") ?? [];
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card/60 p-3">
+      <div className="flex items-center gap-2">
+        <button
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={() => {
+            const next = !open;
+            setOpen(next);
+            if (next && !browse) void load();
+          }}
+        >
+          {open ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{browse?.name ?? repo.name ?? repo.url}</p>
+            <p className="truncate text-xs text-muted-foreground" dir="ltr">
+              {repo.url}
+            </p>
+          </div>
+        </button>
+        {open && (
+          <Button size="icon" variant="ghost" onClick={() => void load()} disabled={loading}>
+            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground hover:text-red-600"
+          onClick={() => void onRemove()}
+        >
+          <Trash2 />
+          {t("extensionsView.remove")}
+        </Button>
+      </div>
+
+      {open && browse && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          {updates.length > 1 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start"
+              disabled={busy !== null}
+              onClick={() => void install(updates)}
+            >
+              <Download />
+              {t("extensionsView.repos.stageAll", { count: updates.length })}
+            </Button>
+          )}
+          {browse.rows.length === 0 && (
+            <p className="text-xs text-muted-foreground">{t("extensionsView.repos.empty")}</p>
+          )}
+          {browse.rows.map((row) => (
+            <div key={row.id} className="flex items-start gap-3">
+              <Describe
+                name={row.name}
+                kind={row.kind}
+                lang={row.lang}
+                nsfw={row.nsfw}
+                description={row.description}
+                baseUrl={row.base_url}
+                mirrors={row.mirrors}
+                capabilities={row.capabilities}
+                badge={
+                  <Chip className={cn(BADGE, STATUS_TONE[row.status])}>
+                    {t(`extensionsView.repos.status.${row.status}`)}
+                  </Chip>
+                }
+                t={t}
+              />
+              {(row.status === "not-installed" || row.status === "update-available") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() => void install([row])}
+                >
+                  {busy === row.id ? <Loader2 className="animate-spin" /> : <Download />}
+                  {t(
+                    row.status === "update-available"
+                      ? "extensionsView.repos.update"
+                      : "extensionsView.repos.install",
+                  )}
+                </Button>
+              )}
+            </div>
+          ))}
+          {browse.skipped > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              {t("extensionsView.repos.skipped", { count: browse.skipped })}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
