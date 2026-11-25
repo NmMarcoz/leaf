@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { saveCover, type SeriesMatch, type VolumeChapters } from "@/lib/api";
 import { useSeriesDetail } from "@/hooks/useSeriesDetail";
+import { useT } from "@/lib/i18n";
 
 export interface AppliedMetadata {
   series: string;
@@ -45,6 +46,7 @@ export function MetadataDialog({
   chapterCount,
   onApply,
 }: MetadataDialogProps) {
+  const t = useT();
   const [session, setSession] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SeriesMatch | null>(null);
@@ -127,11 +129,8 @@ export function MetadataDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85dvh] max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Fetch series metadata</DialogTitle>
-          <DialogDescription>
-            Searches MangaDex, falling back to Kitsu. Nothing is sent anywhere
-            except the search term.
-          </DialogDescription>
+          <DialogTitle>{t("metadataDialog.title")}</DialogTitle>
+          <DialogDescription>{t("metadataDialog.description")}</DialogDescription>
         </DialogHeader>
 
         {/* Same fixed-height split as AddSeriesDialog, for the same reason. */}
@@ -174,17 +173,17 @@ export function MetadataDialog({
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 hover:text-foreground"
               >
-                <ExternalLink className="size-3" /> View source
+                <ExternalLink className="size-3" /> {t("metadataDialog.viewSource")}
               </a>
             )
           }
         >
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("metadataDialog.cancel")}
           </Button>
           <Button onClick={() => void apply()} disabled={!selected || applying}>
             {applying && <Loader2 className="animate-spin" />}
-            Apply
+            {t("metadataDialog.apply")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -202,10 +201,11 @@ function ChapterCheck({
   expected: VolumeChapters | undefined;
   actual: number;
 }) {
+  const t = useT();
   if (!expected) {
     return (
       <p className="text-xs text-muted-foreground">
-        No published layout for volume {volumeNumber}.
+        {t("metadataDialog.noPublishedLayout", { volume: volumeNumber })}
       </p>
     );
   }
@@ -215,13 +215,21 @@ function ChapterCheck({
     <Callout
       tone={matches ? "success" : "warning"}
       title={
-        <>
-          Volume {volumeNumber} has {expected.chapters.length} chapters
-          {matches ? " — matches your folder" : ` — your folder has ${actual}`}
-        </>
+        matches
+          ? t("metadataDialog.chapterCountMatches", {
+              volume: volumeNumber,
+              count: expected.chapters.length,
+            })
+          : t("metadataDialog.chapterCountMismatch", {
+              volume: volumeNumber,
+              count: expected.chapters.length,
+              actual,
+            })
       }
     >
-      Chapters {expected.chapters.map((c) => c.number).join(", ")}
+      {t("metadataDialog.chaptersList", {
+        list: expected.chapters.map((c) => c.number).join(", "),
+      })}
     </Callout>
   );
 }

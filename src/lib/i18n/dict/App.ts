@@ -6,12 +6,14 @@ const dict: PartialDictionary = {
     "app.tasks": "Tasks",
     "app.tasksRunning": "{count} running",
     "app.opening": "Opening your library…",
+    "app.noImages": "No images found in that folder.",
   },
   "pt-BR": {
     "app.dropToOpen": "Solte para abrir esta pasta",
     "app.tasks": "Tarefas",
     "app.tasksRunning": "{count} em andamento",
     "app.opening": "Abrindo sua biblioteca…",
+    "app.noImages": "Nenhuma imagem encontrada nessa pasta.",
   },
 };
 

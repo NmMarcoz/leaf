@@ -21,7 +21,7 @@ const dict: PartialDictionary = {
     "addFromSourceDialog.lock": "Lock",
     "addFromSourceDialog.stopDeveloping": "Remove",
     "addFromSourceDialog.cancel": "Cancel",
-    "addFromSourceDialog.addToLibrary": "Add to library",
+    "addFromSourceDialog.addToLibrary": "Add to shelf",
   },
   "pt-BR": {
     "addFromSourceDialog.title": "Adicionar de uma fonte",
@@ -43,7 +43,7 @@ const dict: PartialDictionary = {
     "addFromSourceDialog.lock": "Travar",
     "addFromSourceDialog.stopDeveloping": "Remover",
     "addFromSourceDialog.cancel": "Cancelar",
-    "addFromSourceDialog.addToLibrary": "Adicionar à biblioteca",
+    "addFromSourceDialog.addToLibrary": "Adicionar à estante",
   },
 };
 

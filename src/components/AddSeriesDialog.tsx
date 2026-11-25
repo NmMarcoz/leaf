@@ -14,7 +14,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSeriesDetail } from "@/hooks/useSeriesDetail";
+import { cn } from "@/lib/utils";
 import type { SeriesMatch } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { libraryAddSeries, type Series } from "@/lib/library";
 
 interface AddSeriesDialogProps {
@@ -37,6 +39,7 @@ export function AddSeriesDialog({
   onAdded,
   onSearchExtensions,
 }: AddSeriesDialogProps) {
+  const t = useT();
   const [session, setSession] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SeriesMatch | null>(null);
@@ -94,16 +97,15 @@ export function AddSeriesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85dvh] max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Add a series</DialogTitle>
-          <DialogDescription>
-            Searches MangaDex, falling back to Kitsu. Adding also pulls the
-            published volume layout, so the library can tell you what is missing.
-          </DialogDescription>
+          <DialogTitle>{t("addSeriesDialog.title")}</DialogTitle>
+          <DialogDescription>{t("addSeriesDialog.description")}</DialogDescription>
         </DialogHeader>
 
         {/* A fixed height, so the dialog does not jump about as results and
             covers arrive; `flex-auto` still lets it shrink under max-h. */}
-        <DialogBody className="h-[480px] flex-auto flex-row gap-0 overflow-hidden border-t border-border p-0">
+        {/* On a phone the two panes stack: side by side, the details were
+            squeezed to a word per line. */}
+        <DialogBody className="h-[480px] flex-auto flex-row gap-0 overflow-hidden border-t border-border p-0 max-sm:flex-col">
           <SeriesSearch
             initialQuery=""
             session={session}
@@ -112,7 +114,12 @@ export function AddSeriesDialog({
             onError={setError}
           />
 
-          <div className="scrollbar-thin min-w-0 flex-1 overflow-y-auto p-6">
+          <div
+            className={cn(
+              "scrollbar-thin min-w-0 flex-1 overflow-y-auto p-6 max-sm:p-4",
+              !selected && "max-sm:hidden",
+            )}
+          >
             <SeriesDetail
               selected={selected}
               detail={detail}
@@ -123,8 +130,10 @@ export function AddSeriesDialog({
             >
               {detail.layout.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  {detail.layout.length} published volumes ·{" "}
-                  {detail.layout.reduce((n, v) => n + v.chapters.length, 0)} chapters
+                  {t("addSeriesDialog.volumesAndChapters", {
+                    volumes: detail.layout.length,
+                    chapters: detail.layout.reduce((n, v) => n + v.chapters.length, 0),
+                  })}
                 </p>
               )}
             </SeriesDetail>
@@ -132,6 +141,8 @@ export function AddSeriesDialog({
         </DialogBody>
 
         <DialogFooter
+          // The hint takes its own line on a phone instead of sliding under the buttons.
+          className="max-sm:flex-wrap max-sm:[&>div:first-child]:basis-full"
           error={error}
           hint={
             onSearchExtensions && (
@@ -141,9 +152,9 @@ export function AddSeriesDialog({
               >
                 <Globe className="size-4 shrink-0 text-text-secondary" />
                 <span className="flex min-w-0 flex-col">
-                  <span className="text-xs font-medium">Not it?</span>
+                  <span className="text-xs font-medium">{t("addSeriesDialog.notIt")}</span>
                   <span className="truncate text-[11px] text-text-secondary">
-                    Search one extension's catalogue
+                    {t("addSeriesDialog.searchExtension")}
                   </span>
                 </span>
                 <ChevronRight className="size-3.5 shrink-0 text-text-secondary" />
@@ -152,11 +163,11 @@ export function AddSeriesDialog({
           }
         >
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("addSeriesDialog.cancel")}
           </Button>
           <Button onClick={() => void add()} disabled={!selected || adding}>
             {adding ? <Loader2 className="animate-spin" /> : <Plus />}
-            Add to shelf
+            {t("addSeriesDialog.add")}
           </Button>
         </DialogFooter>
       </DialogContent>

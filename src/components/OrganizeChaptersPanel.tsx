@@ -3,6 +3,7 @@ import { ArrowDownWideNarrow, ArrowUpWideNarrow, Check, Layers, Loader2 } from "
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useT } from "@/lib/i18n";
 import type { ChapterStatus } from "@/lib/library";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ interface OrganizeChaptersPanelProps {
  * build up before assigning it.
  */
 export function OrganizeChaptersPanel({ chapters, onAssign, onDone }: OrganizeChaptersPanelProps) {
+  const t = useT();
   const [descending, setDescending] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -81,13 +83,15 @@ export function OrganizeChaptersPanel({ chapters, onAssign, onDone }: OrganizeCh
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Button variant="ghost" size="sm" onClick={() => setDescending((d) => !d)}>
           {descending ? <ArrowDownWideNarrow className="size-3.5" /> : <ArrowUpWideNarrow className="size-3.5" />}
-          {descending ? "Newest first" : "Oldest first"}
+          {descending ? t("organizeChaptersPanel.newestFirst") : t("organizeChaptersPanel.oldestFirst")}
         </Button>
         <span className="flex-1 truncate text-[11px] text-muted-foreground">
-          {picked.size > 0 ? `${picked.size} selected` : "Tap to select, shift+click to select a range"}
+          {picked.size > 0
+            ? t("organizeChaptersPanel.selectedCount", { count: picked.size })
+            : t("organizeChaptersPanel.selectHint")}
         </span>
         <Button variant="ghost" size="sm" onClick={onDone}>
-          Done
+          {t("organizeChaptersPanel.done")}
         </Button>
       </div>
 
@@ -128,7 +132,7 @@ export function OrganizeChaptersPanel({ chapters, onAssign, onDone }: OrganizeCh
             autoFocus
             value={volume}
             onChange={(e) => setVolume(e.target.value)}
-            placeholder="Volume…"
+            placeholder={t("organizeChaptersPanel.volumePlaceholder")}
             className="flex-1"
             onKeyDown={(e) => {
               if (e.key === "Enter") void assign();
@@ -136,7 +140,7 @@ export function OrganizeChaptersPanel({ chapters, onAssign, onDone }: OrganizeCh
           />
           <Button onClick={() => void assign()} disabled={!volume.trim() || assigning}>
             {assigning ? <Loader2 className="animate-spin" /> : <Layers />}
-            Assign {picked.size}
+            {t("organizeChaptersPanel.assign", { count: picked.size })}
           </Button>
         </div>
       )}

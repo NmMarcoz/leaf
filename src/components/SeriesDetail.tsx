@@ -5,6 +5,7 @@ import { RemoteImage } from "@/components/RemoteImage";
 import { Chip } from "@/components/ui/chip";
 import type { SeriesMatch } from "@/lib/api";
 import type { SeriesDetailState } from "@/hooks/useSeriesDetail";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type TitleChoice = "english" | "romaji" | "native";
@@ -39,10 +40,11 @@ export function SeriesDetail({
   onChooseCover,
   children,
 }: SeriesDetailProps) {
+  const t = useT();
   if (!selected) {
     return (
       <p className="text-xs text-muted-foreground">
-        Select a result to see titles, covers and the published volume layout.
+        {t("seriesDetail.selectPrompt")}
       </p>
     );
   }
@@ -50,23 +52,27 @@ export function SeriesDetail({
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
-        <p className={OVERLINE}>Title to use</p>
-        <div role="radiogroup" aria-label="Title to use" className="flex flex-wrap gap-1.5">
+        <p className={OVERLINE}>{t("seriesDetail.titleToUse")}</p>
+        <div role="radiogroup" aria-label={t("seriesDetail.titleToUse")} className="flex flex-wrap gap-1.5">
           {(
             [
-              ["english", selected.title_english],
-              ["romaji", selected.title_romaji],
-              ["native", selected.title_native],
+              ["english", selected.title_english, t("seriesDetail.choiceEnglish")],
+              ["romaji", selected.title_romaji, t("seriesDetail.choiceRomaji")],
+              ["native", selected.title_native, t("seriesDetail.choiceNative")],
             ] as const
-          ).map(([choice, value]) =>
+          ).map(([choice, value, label]) =>
             value ? (
               <Chip
                 key={choice}
                 selected={titleChoice === choice}
                 onClick={() => onTitleChoice(choice)}
+                className="max-w-full"
+                title={value}
               >
-                {value}
-                <span className="opacity-50">{choice}</span>
+                {/* Long titles are common; cut them short rather than run the
+                    chip off the dialog's edge. */}
+                <span className="min-w-0 truncate">{value}</span>
+                <span className="shrink-0 opacity-50">{label}</span>
               </Chip>
             ) : null,
           )}
@@ -75,7 +81,7 @@ export function SeriesDetail({
 
       {detail.loading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="size-3.5 animate-spin" /> Loading covers…
+          <Loader2 className="size-3.5 animate-spin" /> {t("seriesDetail.loadingCovers")}
         </div>
       ) : (
         <>
@@ -83,7 +89,9 @@ export function SeriesDetail({
 
           {detail.covers.length > 0 && (
             <section className="flex flex-col gap-2">
-              <p className={OVERLINE}>Cover ({detail.covers.length} volumes)</p>
+              <p className={OVERLINE}>
+                {t("seriesDetail.coverCount", { count: detail.covers.length })}
+              </p>
               <div className="grid grid-cols-6 gap-3">
                 {detail.covers.map((cover) => (
                   <button
@@ -99,7 +107,7 @@ export function SeriesDetail({
                     <RemoteImage
                       url={cover.thumbnail_url}
                       max={256}
-                      alt={`Volume ${cover.volume ?? "?"}`}
+                      alt={t("seriesDetail.volumeAlt", { volume: cover.volume ?? "?" })}
                       className="aspect-[10/15] w-full"
                     />
                     <span className="absolute bottom-0 left-0 right-0 bg-black/70 py-0.5 text-center text-[9px] text-white">
@@ -120,7 +128,7 @@ export function SeriesDetail({
 
       {selected.description && (
         <section className="flex flex-col gap-2">
-          <p className={OVERLINE}>Description</p>
+          <p className={OVERLINE}>{t("seriesDetail.description")}</p>
           <p className="line-clamp-4 text-xs leading-relaxed text-muted-foreground">
             {selected.description}
           </p>

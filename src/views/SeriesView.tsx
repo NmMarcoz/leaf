@@ -57,7 +57,7 @@ import type { Translator } from "@/lib/i18n/types";
 import {
   languageName,
   deliverBuilt,
-  DELIVER_LABEL,
+  deliverLabel,
   type MetaSource,
   formatBytes,
   type Format,
@@ -980,7 +980,7 @@ export function SeriesView({
                 }
               }}
             >
-              {DELIVER_LABEL}
+              {deliverLabel(t)}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1792,7 +1792,7 @@ function SeriesDetails({
             <SelectContent>
               {(languages && languages.length > 0 ? languages : [series.language]).map((code) => (
                 <SelectItem key={code} value={code}>
-                  {languageName(code)}
+                  {languageName(code, t)}
                 </SelectItem>
               ))}
             </SelectContent>

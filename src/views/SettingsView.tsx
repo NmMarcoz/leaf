@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { UpdateStage } from "@/hooks/useUpdater";
-import { useT } from "@/lib/i18n";
+import { LANGUAGES, useT } from "@/lib/i18n";
 import { canPickFolders, canRevealFiles, canSendToDevice, isAndroid } from "@/lib/platform";
 import {
   defaultPrefs,
@@ -29,7 +29,7 @@ import {
   type ReaderPrefs,
 } from "@/lib/reader";
 import {
-  COMPRESSION_PRESETS,
+  compressionPresets,
   CUSTOM_EDGE_MAX,
   CUSTOM_EDGE_MIN,
   CUSTOM_QUALITY_MIN,
@@ -239,7 +239,8 @@ function GeneralPage({
     { value: "light", label: t("settingsView.themeLight") },
     { value: "dark", label: t("settingsView.themeDark") },
   ];
-  const preset = settings && COMPRESSION_PRESETS.find((p) => p.value === settings.compression);
+  const presets = compressionPresets(t);
+  const preset = settings && presets.find((p) => p.value === settings.compression);
 
   return (
     <Pane title={title} status={status}>
@@ -250,6 +251,24 @@ function GeneralPage({
       ) : (
         <>
           <SettingsSection title={t("settingsView.appearance")}>
+            <SettingsRow title={t("settingsView.language")} description={t("settingsView.languageDetail")}>
+              <Select
+                value={settings.ui_language ?? "system"}
+                onValueChange={(v) => patch({ ui_language: v === "system" ? null : v })}
+              >
+                <SelectTrigger className="w-48" aria-label={t("settingsView.language")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="system">{t("settingsView.languageSystem")}</SelectItem>
+                  {LANGUAGES.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
             <SettingsRow title={t("settingsView.theme")} description={t("settingsView.themeDetail")}>
               <div role="radiogroup" aria-label={t("settingsView.theme")} className="flex gap-1.5">
                 {themes.map((option) => (
@@ -362,7 +381,7 @@ function GeneralPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {COMPRESSION_PRESETS.map((p) => (
+                  {presets.map((p) => (
                     <SelectItem key={p.value} value={p.value}>
                       {p.label}
                     </SelectItem>

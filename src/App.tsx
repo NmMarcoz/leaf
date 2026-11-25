@@ -8,6 +8,7 @@ import { AlertTriangle, X } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Splash } from "@/components/Splash";
 import { useTheme } from "@/lib/theme";
+import { LanguageProvider, resolveLanguage, useTranslator } from "@/lib/i18n";
 import { Sidebar, type Section } from "@/components/Sidebar";
 import { useTasks } from "@/components/TaskPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -110,6 +111,15 @@ export default function App() {
   ).length;
 
   const updater = useUpdater();
+  // The one language decision in the app: every `useT()` below reads it from
+  // the provider. `App` itself is above the provider, so it translates with
+  // the resolved language directly. Decided before settings load too, so the
+  // splash and a load error already speak the system's language.
+  const language = resolveLanguage(settings?.ui_language);
+  const t = useTranslator(language);
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   // Settings gate the first screen, so nothing renders until they are known.
   useEffect(() => {
@@ -192,7 +202,7 @@ export default function App() {
       // Thumbnails are keyed by path; a different folder invalidates all of them.
       clearThumbnails();
       if (next.chapters.length === 0) {
-        setError("No images found in that folder.");
+        setError(t("app.noImages"));
         return;
       }
       setVolume(next);
@@ -202,7 +212,7 @@ export default function App() {
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [t]);
 
   const pickFolder = useCallback(async () => {
     const picked = await open({ directory: true, multiple: false });
@@ -420,6 +430,7 @@ export default function App() {
   const chrome = settings !== null && settings.welcomed && view.kind !== "reader";
 
   return (
+    <LanguageProvider value={language}>
     <TooltipProvider delayDuration={400}>
       {/* The rail sits beside the content; the phone's bar sits under it, which
           is the same two children in the other direction with the nav last. */}
@@ -466,7 +477,7 @@ export default function App() {
         {dragging && (
           <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="rounded-xl border-2 border-dashed border-primary px-10 py-8 text-center">
-              <p className="text-sm font-medium">Drop to open this folder</p>
+              <p className="text-sm font-medium">{t("app.dropToOpen")}</p>
             </div>
           </div>
         )}
@@ -495,5 +506,6 @@ export default function App() {
         )}
       </div>
     </TooltipProvider>
+    </LanguageProvider>
   );
 }

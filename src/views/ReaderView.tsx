@@ -560,7 +560,7 @@ export function ReaderView({
           setFailure({
             message: t("readerView.noChapterInLanguage", {
               number: open.number,
-              language: languageName(code),
+              language: languageName(code, t),
             }),
             externalUrl: null,
           });

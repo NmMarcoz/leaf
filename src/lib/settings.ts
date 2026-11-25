@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ExtensionRepo, Format, Volume } from "@/lib/api";
+import type { Translator } from "@/lib/i18n/types";
 
 /** Mirrors `settings::Settings`. */
 export interface Settings {
@@ -32,6 +33,8 @@ export interface Settings {
   disabled_extensions: string[];
   /** Same reasoning: carried so a Settings round-trip keeps them. */
   extension_repos: ExtensionRepo[];
+  /** The app's own language; `null` follows the system. See `resolveLanguage`. */
+  ui_language: string | null;
 }
 
 /** Mirrors `leaf_core::Compression`. */
@@ -100,40 +103,39 @@ export const buildLibraryVolumes = (args: {
 
 /**
  * What each compression preset does, in the terms that matter: how big the
- * result is and what it looks like on the device.
+ * result is and what it looks like on the device. A function of `t`, not a
+ * static array, since the labels are shown in the UI language.
  */
-export const COMPRESSION_PRESETS: {
+export const compressionPresets = (
+  t: Translator,
+): {
   value: string;
   label: string;
   detail: string;
-}[] = [
+}[] => [
   {
     value: "original",
-    label: "Original",
-    detail:
-      "Pages are copied untouched. Largest files, and usually far more detail than any e-reader can show.",
+    label: t("settings.compressionOriginal"),
+    detail: t("settings.compressionOriginalDetail"),
   },
   {
     value: "large",
-    label: "Large · 2400px",
-    detail: "For a Kindle Scribe or a tablet. Roughly half the size of the original.",
+    label: t("settings.compressionLarge"),
+    detail: t("settings.compressionLargeDetail"),
   },
   {
     value: "kindle",
-    label: "Kindle · 1600px",
-    detail:
-      "Matches a Paperwhite or Oasis exactly. Typically a quarter of the original size, with nothing visible lost on the device.",
+    label: t("settings.compressionKindle"),
+    detail: t("settings.compressionKindleDetail"),
   },
   {
     value: "compact",
-    label: "Compact · 1280px",
-    detail:
-      "When a volume has to fit an email attachment limit. Softer if you zoom right in.",
+    label: t("settings.compressionCompact"),
+    detail: t("settings.compressionCompactDetail"),
   },
   {
     value: "custom",
-    label: "Custom",
-    detail:
-      "Your own size and quality — for a device none of the presets fit, or to trade file size against sharpness yourself.",
+    label: t("settings.compressionCustom"),
+    detail: t("settings.compressionCustomDetail"),
   },
 ];

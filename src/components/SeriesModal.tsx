@@ -1,3 +1,4 @@
+import { ratingLabel, statusLabel } from "@/components/LibraryFilters";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
@@ -255,7 +256,7 @@ export function SeriesModal({
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                {series.status && <span className="capitalize"> · {series.status}</span>}
+                {series.status && <span> · {statusLabel(t, series.status)}</span>}
                 {series.demographic && (
                   <span className="capitalize"> · {series.demographic}</span>
                 )}
@@ -279,7 +280,7 @@ export function SeriesModal({
                     variant={series.content_rating === "safe" ? "outline" : "default"}
                     className="capitalize"
                   >
-                    {series.content_rating}
+                    {ratingLabel(t, series.content_rating)}
                   </Badge>
                 )}
                 {series.site_url && (
@@ -354,7 +355,7 @@ export function SeriesModal({
                 <SelectContent>
                   {series.available_languages.map((code) => (
                     <SelectItem key={code} value={code}>
-                      {languageName(code)}
+                      {languageName(code, t)}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -77,7 +77,7 @@ export function ReaderSettings({
               >
                 {translations.map((code) => (
                   <option key={code} value={code} className="bg-popover">
-                    {languageName(code)}
+                    {languageName(code, t)}
                   </option>
                 ))}
               </select>

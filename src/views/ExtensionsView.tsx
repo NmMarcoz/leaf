@@ -150,12 +150,12 @@ export function ExtensionsView({ onError }: ExtensionsViewProps) {
     async (replaceFor?: string) => {
       const picked = await openDialog({
         multiple: false,
-        filters: [{ name: "Lua extension", extensions: ["lua"] }],
+        filters: [{ name: t("extensionsView.luaFilter"), extensions: ["lua"] }],
       });
       if (typeof picked !== "string") return;
       await act(replaceFor ?? "", () => installExtension(picked, replaceFor));
     },
-    [act],
+    [act, t],
   );
 
   const install = useCallback(
@@ -452,7 +452,7 @@ function detailLine(t: Translator, lang?: string, ...rest: (string | null | unde
     lang === "multi" || lang === "all"
       ? t("extensionsView.manyLanguages")
       : lang
-        ? languageName(lang)
+        ? languageName(lang, t)
         : null;
   return [language, ...rest].filter(Boolean).join(" · ");
 }
