@@ -20,17 +20,13 @@ use crate::settings;
 use crate::thumbs;
 use crate::util::blocking;
 
-/// Page URLs for a chapter read straight from the source.
+/// Page URLs for a chapter read straight from its reader extension.
 ///
-/// An empty `pages` with `external_url` set is not a failure — it is the source
-/// saying it indexes the chapter but the publisher hosts it. The reader shows
-/// that as a destination rather than an error.
+/// A chapter a site indexes but a publisher hosts arrives as the reader's
+/// error, ending in the publisher's URL; the frontend offers that URL.
 #[derive(Serialize)]
 pub struct OnlineChapter {
     pub pages: Vec<String>,
-    pub external_url: Option<String>,
-    /// Ready to show. Empty when the pages came back fine.
-    pub message: Option<String>,
 }
 
 /// Everything the reader needs to open a chapter.
@@ -130,12 +126,13 @@ pub async fn reader_page(
 
 /// Resolve a chapter's page URLs without downloading anything.
 ///
-/// The image server is chosen per request and its address expires, so this is
-/// called when the chapter is opened rather than cached. `source` is
-/// free-text: MangaDex/Kitsu are tried first, and anything else is looked up
-/// in the registered-`Source` registry (a `.lua` extension, say) — a
-/// registered source has no "hosted elsewhere" concept, so its pages are
-/// always `Hosted`.
+/// Image servers can be chosen per request and expire, so this is called when
+/// the chapter is opened rather than cached. `source` is the series' source
+/// id; its pages come from `Registry::reader_for` — the source itself when it
+/// is a reader extension, else an installed reader for the same site (a
+/// MangaDex series reads through a reader declaring `mangadex.org`). The app
+/// fetches no pages of its own, so with no such reader this says which one
+/// is missing instead of streaming anything.
 #[tauri::command]
 pub async fn reader_online_chapter(
     app: AppHandle,
@@ -143,31 +140,10 @@ pub async fn reader_online_chapter(
     chapter_id: String,
 ) -> Result<OnlineChapter, String> {
     blocking(move || {
-        use leaf_meta::mangadex::{unhosted_message, ChapterImages};
-
-        if let Some(meta_source) = crate::util::parse_meta_source(&source) {
-            return Ok(match leaf_meta::chapter_images(meta_source, &chapter_id)? {
-                ChapterImages::Hosted(pages) => OnlineChapter {
-                    pages,
-                    external_url: None,
-                    message: None,
-                },
-                ChapterImages::External(url) => OnlineChapter {
-                    pages: Vec::new(),
-                    message: Some(unhosted_message(url.as_deref())),
-                    external_url: url,
-                },
-            });
-        }
-
         let registry = crate::sources::load_registry(&app)?;
-        let ext_source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow::anyhow!("{source:?} is not a registered source"))?;
+        let reader = registry.reader_for(&source)?;
         Ok(OnlineChapter {
-            pages: ext_source.page_list(&chapter_id)?,
-            external_url: None,
-            message: None,
+            pages: reader.page_list(&chapter_id)?,
         })
     })
     .await
@@ -206,18 +182,27 @@ pub async fn reader_online_chapters(
 ) -> Result<Vec<OnlineChapterRef>, String> {
     blocking(move || {
         let language = language.as_deref().filter(|l| !l.is_empty());
-        let volumes = if let Some(meta_source) = crate::util::parse_meta_source(&source) {
-            leaf_meta::volume_chapters_in(meta_source, &series_source_id, language)?
-        } else {
-            let registry = crate::sources::load_registry(&app)?;
-            let ext_source = registry
-                .get(&source)
-                .ok_or_else(|| anyhow::anyhow!("{source:?} is not a registered source"))?;
-            ext_source.volumes(&series_source_id, language)?
-        };
-        Ok(volumes
+        let chapters: Vec<leaf_meta::ChapterRef> =
+            if let Some(meta_source) = crate::util::parse_meta_source(&source) {
+                leaf_meta::volume_chapters_in(meta_source, &series_source_id, language)?
+                    .into_iter()
+                    .flat_map(|v| v.chapters)
+                    .collect()
+            } else {
+                let registry = crate::sources::load_registry(&app)?;
+                // A catalogue knows its translations; a reader only has the
+                // one chapter list it serves.
+                match registry.metadata(&source) {
+                    Ok(catalogue) => catalogue
+                        .volumes(&series_source_id, language)?
+                        .into_iter()
+                        .flat_map(|v| v.chapters)
+                        .collect(),
+                    Err(_) => registry.reader(&source)?.chapters(&series_source_id)?,
+                }
+            };
+        Ok(chapters
             .into_iter()
-            .flat_map(|v| v.chapters)
             .filter(|c| !c.unavailable)
             .filter_map(|c| {
                 c.id.map(|id| OnlineChapterRef {
@@ -320,19 +305,11 @@ pub async fn reader_remote_page(
             return Ok(tauri::ipc::Response::new(bytes));
         }
 
-        let started = std::time::Instant::now();
-        let fetched = leaf_fetch::download::fetch_image(&url, None);
-        let millis = started.elapsed().as_millis() as u64;
-
-        // Tell the volunteer network how its server did, either way. See
-        // `leaf_meta::report_page_fetch`.
-        let bytes = match &fetched {
-            Ok((bytes, _)) => bytes.len(),
-            Err(_) => 0,
-        };
-        leaf_meta::report_page_fetch(&url, fetched.is_ok(), false, bytes, millis);
-
-        let (raw, _) = fetched?;
+        // No per-site delivery reports here (MangaDex@Home asks for them):
+        // the binary knows no site's image network, and a reader script has
+        // no hook that runs after the host's fetch. A courtesy lost with the
+        // page path leaving the binary, until readers get one.
+        let (raw, _) = leaf_fetch::download::fetch_image(&url, None)?;
         let page = image::load_from_memory(&raw)?.thumbnail(max, max * 3);
 
         let mut out = Vec::new();

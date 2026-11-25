@@ -93,6 +93,20 @@ Thresholds are named consts at the top of `sieve.rs` (`HEIGHT_MIN`, `WIDTH_MAX`,
 ## Metadata (`crates/Leaf-meta`)
 
 - Network access is **always user-initiated**. Scan and export never touch it.
+- **Metadata only — the binary fetches no pages.** The MangaDex@Home path
+  (`/at-home/server`, image-server URLs, delivery reports) was deleted, not
+  feature-flagged, and `no_shipped_code_constructs_an_image_server_url` in
+  `leaf-extensions/tests` keeps it out of `leaf-meta`, the native sources,
+  `reader.rs` and `fetch.rs`. A MangaDex chapter id becomes pages only through
+  a user-installed reader script declaring `mangadex.org`:
+  `Registry::reader_for` matches a catalogue to a reader **by declared site**,
+  never by script id, so the binary names no script. With none installed the
+  error says what to install. The courtesy delivery reports MangaDex@Home asks
+  for left with it — a reader has no post-fetch hook yet.
+- Chapter ids, the volume map and translation switching stay native: the
+  reader script only turns an id into page URLs. An unhosted chapter is the
+  reader's *error*, ending in the publisher URL, which `ReaderView` offers as
+  a button — the one channel a script has.
 - MangaDex responses are walked as untyped `serde_json::Value` on purpose: the
   shapes are deep, optional and mostly discarded.
 - MangaDex's canonical `title` is in whatever language the uploader chose, so the
@@ -113,11 +127,54 @@ Thresholds are named consts at the top of `sieve.rs` (`HEIGHT_MIN`, `WIDTH_MAX`,
 
 ## Scripted sources (`crates/leaf-extensions`)
 
-Third-party manga sites are `.lua` files, not compiled Rust and not WASM —
-chosen so a Keiyoushi/Tachiyomi extension can be ported by eye (the `Source`
-trait mirrors `CatalogueSource`/`HttpSource` on purpose). MangaDex stays native
-Rust behind the same trait; "works as an extension" means registry membership,
+Third-party sites are `.lua` files, not compiled Rust and not WASM — chosen
+so a Keiyoushi/Tachiyomi extension can be ported by eye (the role traits
+mirror `CatalogueSource`/`HttpSource` on purpose). MangaDex stays native Rust
+behind the same traits; "works as an extension" means registry membership,
 not implementation language.
+
+- **No script ships in this repo, and nothing here names where they live.**
+  Not the code, not the README, not docs, not a settings default. Scripts are
+  user-installed, from a file or from an extension repository whose address
+  the *user types*. Tests use synthetic `*.example` scripts written inline. A
+  real site's name or domain in this tree is a regression — `git grep` for
+  one before merging extension work.
+- **Three kinds, one hard line** (`types.rs`, `lua/mod.rs::check_kind`).
+  `SOURCE.kind` is required: `metadata` (`MetadataSource`: catalogue +
+  volume map), `enrich` (`EnrichSource`: details only, one `lookup(title)`),
+  `reader` (`ReaderSource`: `search`/`chapters`/`page_list`). A non-reader
+  defining `page_list` or `chapters` is a **load error** — the security line,
+  enforced at load and re-checked inside `LuaSource`'s methods, never at a
+  call site. Missing a kind's required function is also an error; any other
+  foreign function is a warning and is never called.
+- **The registry is per role.** One id can play several roles (MangaDex is
+  catalogue + reader + enricher), so callers ask `metadata(id)` /
+  `reader(id)` / `enrich_sources()`, and a miss says `NotFound` or
+  `WrongKind` — the pickers need to tell the user *which* line they hit.
+  `list_sources` returns catalogues only. Builtins register first and a
+  script cannot reuse a taken id. No builtin is a reader. `"mangadex"` (the
+  pre-registry spelling on old library rows) is an alias for `leaf.mangadex`.
+  Pages are always asked for through `reader_for(series.source)`.
+- **Transitional: a reader carrying a full catalogue** (`search` +
+  `manga_details` + `volumes`) is also registered as a catalogue, and lists
+  `chapters` through `volumes`. Without it every reader would leave Explore
+  before series can bind chapters to a reader independently of their
+  metadata source. Remove when that lands.
+- **The enrich chain is registration order**: MangaDex (Kitsu fallback
+  inside its `lookup`, not a separate entry — that would query Kitsu on
+  every lookup), AniList, Jikan, then user enrich scripts. `fill_gaps` never
+  overrides a filled field, and the enricher's title is dropped.
+- **`SOURCE.api` vs `API_LEVEL`**: an integer host-API level, not the app
+  version (which the crate version does not even track). A script asking for
+  more is refused with "update Leaf". Bump `API_LEVEL` when `leaf.*` gains
+  something a script could depend on.
+- **Repositories (`repo.rs`)**: a URL → `index.json` listing scripts with
+  their manifest and sha256. Install downloads, refuses on any sha256 or
+  id/kind mismatch with the index, writes over the local file with the same
+  id, and **stops** — the file lands pending. Update = new bytes = re-ask.
+  No signing; the per-file hash at approval is the anchor. Fetches use
+  `net_guard` under `Scope::Repos`, whose escape hatch is
+  `LEAF_ALLOW_PRIVATE_REPOS`, deliberately not the scripts' variable.
 
 - **Where scripts live: `<library root>/extensions/`** (`src-tauri/src/sources.rs`),
   *not* the app install folder. Same folder the CLI reads, so it travels with the
@@ -132,13 +189,13 @@ not implementation language.
   manifest declared. Renaming the app does NOT rename this global; a script
   calling `mangalize.*` fails at call time, not load time, because functions
   resolve `leaf.http.get` when they run.
-- **No crypto library in the sandbox.** `example.lua` carries a pure-Lua MD5
-  (masked 32-bit ops on Lua 5.4's 64-bit operators) because the site's chapter
-  endpoint demands `md5(timestamp .. …)` and there is nothing to call. That's the
+- **No crypto library in the sandbox.** A script that needs MD5 carries a
+  pure-Lua one (masked 32-bit ops on Lua 5.4's 64-bit operators). That's the
   precedent: exotic needs get implemented in Lua, not added to the host.
 - **One VM per source, on a dedicated thread.** `mlua::Lua` is not `Send`, so
   `LuaSource` spawns a `leaf-lua-source` thread and every `Source` method is a
   channel message (`ask`) to it — same shape as `tasks.rs`'s single worker.
+  An enrich `lookup` is `search` + `details` composed on that thread.
   Each call is bounded by `CALL_TIMEOUT` (20 s) via a debug hook, since Lua 5.4
   has no interrupt API; a timed-out script poisons the thread and the source is
   dead from then on. `load()` blocks until `SOURCE` is read, so broken scripts
@@ -155,7 +212,8 @@ not implementation language.
     they are the one script output the *host itself* requests next.
   - a **trust gate**: the app registers a user script only if its sha256
     fingerprint sits in settings (`approved_extensions`); otherwise it shows
-    as *pending* in AddFromSourceDialog with its name/id/base_url.
+    as *pending* (ExtensionsView, AddFromSourceDialog) with its kind, every
+    origin it may reach, and its id.
     Content-addressed on purpose — an edit after approval unapproves. Files
     in `dev_extensions` (the "Develop" button) bypass the fingerprint
     entirely so an author can save-and-test in the GUI; "Lock" freezes the
@@ -167,8 +225,10 @@ not implementation language.
   user's own choice, never a script's: without it the localhost test fixtures
   and anyone developing against a local server could not run. Set at request
   time, not startup, so tests can flip it.
-- Verifying a script loads without the GUI: `LuaSource::load(std::fs::read…)` is
-  public — a two-line test against the real file is the fastest smoke check.
+- Verifying a script loads without the GUI: `leaf sources verify <files|dirs>`
+  (no network; `--json` prints manifests + sha256, which is what an
+  extension repository's index generator consumes). `LuaSource::load` is
+  public too.
 
 ## The library (`crates/Leaf-library`)
 

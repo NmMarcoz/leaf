@@ -3,6 +3,11 @@
 //! This is the only part of Leaf that touches the network, and it is always
 //! user-initiated: scanning and exporting stay entirely offline.
 //!
+//! Metadata only. Nothing here fetches a chapter's pages from any source —
+//! that is a reader extension's job, installed by the user — and the
+//! MangaDex@Home image-server path that used to live here was removed so the
+//! claim can be checked by reading the crate.
+//!
 //! [MangaDex] is the primary source because it is the only free, key-less API
 //! that publishes *per-volume* cover art and a volume-to-chapter map, which is
 //! what a `Source`'s downloadable chapters actually need. [Kitsu] is the
@@ -311,14 +316,6 @@ pub fn volume_covers(source: Source, id: &str) -> Result<Vec<VolumeCover>> {
     }
 }
 
-/// Report a page fetch back to the network that served it.
-///
-/// See [`mangadex::report_at_home`]. A no-op for anything not served by
-/// MangaDex@Home.
-pub fn report_page_fetch(url: &str, success: bool, cached: bool, bytes: usize, millis: u64) {
-    mangadex::report_at_home(url, success, cached, bytes, millis);
-}
-
 /// Browse the catalogue, with or without a search term.
 ///
 /// Only MangaDex: Kitsu is a fallback for looking a known title up, not
@@ -362,26 +359,6 @@ pub fn volume_chapters_in(
 /// Every tag a series can carry, for building a filter picker.
 pub fn tags() -> Result<Vec<Tag>> {
     mangadex::tags()
-}
-
-/// Where a chapter's images live, distinguishing "not hosted here" from an
-/// error. See [`mangadex::ChapterImages`].
-pub fn chapter_images(source: Source, chapter_id: &str) -> Result<mangadex::ChapterImages> {
-    match source {
-        Source::MangaDex => mangadex::chapter_images(chapter_id),
-        Source::Kitsu => bail!("Kitsu does not host chapter images"),
-    }
-}
-
-/// Image URLs for one chapter, straight from the source.
-///
-/// Far better than reading a page: no rendering, no guessing which `<img>` is a
-/// page, and the ordering is the publisher's own. Only MangaDex offers this.
-pub fn chapter_pages(source: Source, chapter_id: &str) -> Result<Vec<String>> {
-    match source {
-        Source::MangaDex => mangadex::chapter_pages(chapter_id),
-        Source::Kitsu => bail!("Kitsu does not host chapter images"),
-    }
 }
 
 /// The published volume-to-chapter map, when the source has one.

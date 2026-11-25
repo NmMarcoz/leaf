@@ -1,28 +1,71 @@
 # Writing a Leaf extension
 
-A Leaf extension is one `.lua` file: a script that teaches the app a manga
-site it has no built-in client for. It is not a plugin in the usual sense —
-there is no UI hook, no event system, no install step. The script answers a
-fixed set of functions and the rest of the app treats its site exactly like
-MangaDex.
+A Leaf extension is one `.lua` file: a script that teaches the app a site it
+has no built-in client for. It is not a plugin in the usual sense — there is
+no UI hook, no event system, no install step. The script answers a fixed set
+of functions, decided by its **kind**, and the rest of the app treats it like
+any built-in source of that kind.
 
 If you know a Tachiyomi/Keiyoushi `HttpSource`, you know this: the method
 names and shapes deliberately mirror `CatalogueSource`, so porting is mostly
 translating Kotlin selectors into `leaf.html.select` calls.
+
+## Kinds
+
+Every script declares one `kind` in its manifest. It decides which functions
+the script must define, which it may define, and what the app lets it do.
+
+| kind | what it is | must define | may also define |
+| --- | --- | --- | --- |
+| `metadata` | a catalogue: browse titles, read a series' details and its volume → chapter map | `search`, `manga_details`, `volumes` | `popular`, `latest`, `covers` |
+| `enrich` | details only: descriptions, credits, alt titles, a series cover | `search`, `details` | — |
+| `reader` | serves chapter pages | `page_list` | `search`, `chapters` |
+
+The line that matters: **only a reader may serve pages.** A `metadata` or
+`enrich` script that defines `page_list` or `chapters` is refused when it
+loads — not filtered somewhere later — so "this script cannot download
+anything" is a promise the loader keeps, and the approval screen can say so.
+
+Anything else that does not belong to a kind is a *warning*, shown on the
+extension's row, and the function is never called. Ported extensions carry
+adjacent code; they should not die on it.
+
+A catalogue's chapters are read through a reader **for the same site**: when
+a series' source is a catalogue (the built-in MangaDex one included), Leaf
+asks the first installed reader whose `base_url` or `mirrors` share that
+catalogue's origin. So a reader for a site Leaf already catalogues needs only
+`page_list` — it receives that catalogue's own chapter ids. That is how
+MangaDex chapters are read at all: Leaf fetches no pages itself, and a
+reader declaring `https://mangadex.org` supplies them.
+
+A chapter the site lists but does not host is best reported by `error(...)`
+with a message ending in the publisher's URL: the reader screen turns a
+trailing URL into a "read at publisher" button.
+
+A reader without `search` + `chapters` loads fine but can only serve
+chapters linked by hand (or a catalogue's, as above). A reader that still carries a whole catalogue
+(`search` + `manga_details` + `volumes`, from before kinds existed) is also
+offered in Explore, and lists its chapters through `volumes` if it has no
+`chapters`. That is transitional: write new readers with `chapters`.
 
 ## The one-minute version
 
 ```lua
 -- my-site.lua
 SOURCE = {
-  id       = "user.my-site",          -- stable, namespaced; stored on series rows
-  name     = "My Site",               -- shown in pickers
-  lang     = "en",                    -- ISO 639-1
-  base_url = "https://my-site.example",
+  id          = "user.my-site",            -- stable, namespaced; stored on series rows
+  name        = "My Site",                 -- shown in pickers
+  kind        = "reader",                  -- "metadata" | "enrich" | "reader"
+  lang        = "en",                      -- ISO 639-1, or "multi"
+  base_url    = "https://my-site.example",
+  mirrors     = { "https://cdn.my-site.example" }, -- optional: other origins it calls
+  description = "One line on what this is.",       -- optional, shown in the panel
+  api         = 1,                         -- optional: host API level it needs
+  nsfw        = false,                     -- optional: mostly adult catalogue
 }
 
-function popular(page)
-  local res = leaf.http.get(SOURCE.base_url .. "/browse?page=" .. page)
+function search(query, page)
+  local res = leaf.http.get(SOURCE.base_url .. "/search?q=" .. query .. "&page=" .. page)
   local data = leaf.json.decode(res.body)
   local out = {}
   for i, row in ipairs(data.results) do
@@ -31,36 +74,21 @@ function popular(page)
   return { manga = out, has_next_page = #out > 0 }
 end
 
-function latest(page)  return popular(page) end
-function search(query, page)
-  local res = leaf.http.get(SOURCE.base_url .. "/search?q=" .. query .. "&page=" .. page)
-  -- ...same shape as popular
-end
-
-function manga_details(id)
-  local res = leaf.http.get(SOURCE.base_url .. "/manga/" .. id)
-  local doc = res.body
-  local title = leaf.html.select(doc, "h1")[1].text
-  return { title = title }
-end
-
-function volumes(id, language)
-  local res = leaf.http.get(SOURCE.base_url .. "/manga/" .. id .. "/chapters")
+function chapters(manga_id)
+  local res = leaf.http.get(SOURCE.base_url .. "/manga/" .. manga_id .. "/chapters")
   local data = leaf.json.decode(res.body)
-  local chapters = {}
+  local out = {}
   for i, row in ipairs(data.chapters) do
-    chapters[i] = { number = row.num, id = row.slug, title = row.name }
+    out[i] = { number = row.num, id = row.slug }
   end
-  return { { volume = "1", chapters = chapters } }
+  return out
 end
-
-function covers(id) return {} end      -- optional in spirit; the fn is required
 
 function page_list(chapter_id)
   local res = leaf.http.get(SOURCE.base_url .. "/read/" .. chapter_id)
   local out = {}
   for i, img in ipairs(leaf.html.select(res.body, ".reader img")) do
-    out[i] = img.attrs["src"]
+    out[i] = img.attrs["data-src"] or img.attrs["src"]
   end
   return out
 end
@@ -69,41 +97,97 @@ end
 Test it from a terminal before touching the app:
 
 ```sh
-Leaf sources test my-site.lua --id one-piece --popular
+leaf sources test my-site.lua one-piece          # the id your functions expect
+leaf sources test my-catalogue.lua 123 --popular # catalogues: also page 1 of popular
+leaf sources verify my-site.lua                  # load only, no network
 ```
 
-That loads the script through the real sandbox against the real network,
-prints each call's result, and registers nothing anywhere.
+`test` loads the script through the real sandbox against the real network,
+prints each call's result, and registers nothing anywhere. `verify` loads
+without calling anything and prints what the loader concluded: kind,
+capabilities, warnings.
 
 ## Installing and approving
 
 Drop the file in `<library>/extensions/` — by default `~/Leaf/extensions/`.
 Both the CLI and the app read that one folder, and it travels with your
-library. There is no install step and no restart: every source command builds
-a fresh registry from the folder, so a save is picked up by the next call.
+library. There is no restart: every source command builds a fresh registry
+from the folder, so a save is picked up by the next call.
 
 The app will **not** run it yet. A script is code running with the app's
-network access, so the desktop asks first: open *Add from a source* and the
-new file appears in a pending panel with two choices.
+network access, so the desktop asks first: the Extensions screen (and *Add
+from a source*) lists the new file as pending, with its kind spelled out —
+"Reader — finds chapters on a site and downloads their pages" — and every
+origin it may reach.
 
 - **Approve** freezes the current bytes: a sha256 is recorded as the
   approval, and any later edit re-gates the file, because what you approved
-  was the old bytes. This is what you want for a finished extension from
-  someone else.
+  was the old bytes. The kind is part of those bytes, so a script that
+  changes kind is asked about again.
 - **Develop** puts the file in development mode: it is registered whatever
   its current contents are, so saving takes effect with no re-ask — the
   save-forty-times loop you need while authoring. When the script is done,
   **Lock** converts its current bytes into a real approval and leaves dev
   mode; from then on edits re-gate like any other file.
 
-(The CLI skips all of this — see below — but since dev mode exists, you can
-now iterate inside the app itself. Note the promise dev mode makes is about
-the *file*, not its bytes: keep it on only for scripts you are writing.)
-
 The CLI skips the gate on purpose — you chose to run a terminal against your
 library — so `sources test` and `library get` work on any script regardless
-of its approval state. It is still the fastest feedback loop: no dialog, and
-every call's return printed.
+of its approval state.
+
+## Repositories
+
+A repository is an address serving an `index.json` that lists scripts. Leaf
+ships with none and names none; the user types the address on the Extensions
+screen (or `leaf sources repo browse <url>`). Installing from one downloads
+the script into the extensions folder **and stops** — it lands pending and
+the gate asks, exactly as for a file copied in by hand. An update is a new
+file over the old one, so it re-asks too.
+
+The index, at the address the user typed (or `index.json` inside it):
+
+```json
+{
+  "schema": 1,
+  "name": "Some repository",
+  "generated": "2026-11-25",
+  "scripts": [
+    {
+      "file": "readers/my-site.lua",
+      "id": "user.my-site",
+      "name": "My Site",
+      "kind": "reader",
+      "lang": "en",
+      "base_url": "https://my-site.example",
+      "mirrors": [],
+      "description": "One line on what this is.",
+      "api": 1,
+      "nsfw": false,
+      "capabilities": ["search", "chapters", "pages"],
+      "sha256": "…",
+      "version": "2026-11-25"
+    }
+  ]
+}
+```
+
+- `file` is resolved relative to the index's own URL.
+- `sha256` is of the exact bytes served. Leaf hashes what it downloads and
+  **refuses** the install if they differ; it also refuses a script whose
+  manifest disagrees with its entry's `id` or `kind`.
+- `version` is a date for people; the fingerprint is the real version.
+- An entry with a `kind` this build does not know is skipped, not fatal. An
+  `api` above the build's level is listed as needing a newer Leaf and not
+  offered. A `schema` above 1 refuses the whole index.
+- Generate the index with `leaf sources verify --json <dirs>` — it prints
+  each script's manifest and sha256 as the loader sees them — never by hand.
+  `verify` also refuses a script whose kind disagrees with a `metadata/`,
+  `enrich/` or `readers/` folder it sits in, and two scripts sharing an id.
+
+Fetching a repository goes through the same private-address guard as a
+script's requests. `LEAF_ALLOW_PRIVATE_REPOS=1` turns it off for repositories
+(local testing); `LEAF_ALLOW_PRIVATE_SOURCES` does not — trusting a list of
+code on some other machine is a different decision from scraping a local
+fixture.
 
 ## The sandbox
 
@@ -112,7 +196,7 @@ modules, and nothing else:
 
 | | |
 | --- | --- |
-| `leaf.http.get(url, opts?) → {status, body}` | `opts.referer` sets a `Referer` header |
+| `leaf.http.get(url, opts?) → {status, body}` | `opts.referer` sets a `Referer` header; `opts.headers` adds any others |
 | `leaf.http.post(url, body_string, opts?)` | sends `body` with `Content-Type: application/json` |
 | `leaf.html.select(html, css) → rows` | each row: `.text`, `.html`, `.attrs` (e.g. `row.attrs["src"]`, `row.attrs["data-src"]`) |
 | `leaf.json.decode(s)` / `leaf.json.encode(v)` | plain Lua tables in and out |
@@ -124,16 +208,21 @@ Not available, by design:
 - **No `require`, no `load`.** Everything you need goes in the one file.
   Two scripts cannot share code; copy the helper in.
 - **No network except `leaf.http`** — and it is bounded twice: requests only
-  go to `base_url` (plus an optional `mirrors = {...}` list in `SOURCE`), and
-  the host refuses to connect to any loopback/private/link-local/metadata
-  address even if a name resolves there. Redirects are followed only when
-  they land back inside your declared origins.
-- **No crypto library.** If the site needs an MD5 token, you write MD5 in
-  Lua — `example.lua` carries a pure-Lua one as the worked example
-  (masking to 32 bits after each step, since Lua 5.4 integers are 64-bit).
-- **20 seconds per call.** `popular`, `search`, `page_list` — each is aborted
-  if it runs longer, and the source is dead for the rest of the session.
-  Keep work per call to one or two HTTP round-trips.
+  go to `base_url` (plus the `mirrors` list in `SOURCE`), and the host
+  refuses to connect to any loopback/private/link-local/metadata address even
+  if a name resolves there. Redirects are followed only when they land back
+  inside your declared origins.
+- **No crypto library.** If a site needs an MD5 token, you write MD5 in Lua,
+  masking to 32 bits after each step since Lua 5.4 integers are 64-bit. That
+  is the rule for every exotic need: implement it in the script, the host
+  does not grow.
+- **20 seconds per call.** `search`, `page_list`, any of them — each is
+  aborted if it runs longer, and the source is dead for the rest of the
+  session. Keep work per call to one or two HTTP round-trips.
+
+`SOURCE.api` is the host API level a script needs, `1` when omitted. A
+script asking for more than the running Leaf offers is refused at load with
+"update Leaf" instead of failing halfway through a call.
 
 ## What each function must return
 
@@ -146,23 +235,31 @@ All shapes are plain tables; missing optional fields are fine.
   every other function. Use a slug or site id, not a URL, if you can: the
   app re-reads through your functions later with no memory of how the id was
   built.
-- `manga_details(id)` → `{ title, author?, artist?, description?, tags?,
-  content_rating?, available_languages?, cover_url? }`. `title` is required.
-- `volumes(id, language)` → `{ { volume = "1", chapters = { {number, id, title?}, ... } }, ... }`,
+- `manga_details(id)` (metadata) and `details(id)` (enrich) →
+  `{ title, title_romaji?, title_native?, author?, artist?, description?,
+  tags?, content_rating?, available_languages?, cover_url? }`. `title` is
+  required. An enrich script's `search` + `details` are asked together: the
+  app takes the first search hit's details to fill gaps in a series, and
+  never overrides a field another source already filled.
+- `volumes(id, language)` → `{ { volume = "1", chapters = { {number, id, unavailable?}, ... } }, ... }`,
   oldest first. `number` is what the library sorts and names folders by, and
-  what it matches across translations — keep it the plain chapter number as a
-  string (`"7"`, `"10.5"`), not the display label. `language` may be `nil`;
-  ignore it unless the site serves several.
+  what it matches across translations and sources — keep it the plain
+  chapter number as a string (`"7"`, `"10.5"`), not the display label.
+  `language` may be `nil`; ignore it unless the site serves several.
 - `covers(id)` → `{ {url, thumbnail_url?, volume?}, ... }` — per-volume cover
   art the shelf shows. Returning `{}` is fine.
-- `page_list(chapter_id)` → an array of image URLs **in reading order**.
-  The app downloads them exactly as given. Relative URLs are resolved against
-  the chapter page you got them from; `data:` URIs work too. Note the guard:
-  page URLs pointing at private addresses are dropped before download.
+- `chapters(manga_id)` (reader) → `{ {number, id, unavailable?}, ... }` —
+  the same rows as inside `volumes`, without the volume grouping. It is how
+  "chapter 7 of this series" becomes your site's chapter id.
+- `page_list(chapter_id)` (reader) → an array of image URLs **in reading
+  order**. The app downloads them exactly as given. Relative URLs are
+  resolved against the chapter page you got them from; `data:` URIs work too.
+  Note the guard: page URLs pointing at private addresses are dropped before
+  download.
 
 ## Debugging tips
 
-- **`Leaf sources test` prints each call's return values** and is much faster
+- **`leaf sources test` prints each call's return values** and is much faster
   than the GUI for selector work. `print(...)` works and lands on the CLI's
   stdout, so `print(body:sub(1,500))` is the quick look at what a call
   actually received; inside the GUI, stdout goes where the app was launched
@@ -180,18 +277,20 @@ All shapes are plain tables; missing optional fields are fine.
 - **A chapter whose pages all vanish at the app's size sieve** is usually
   your `page_list` returning the thumbnail route instead of the full image.
 - If the app silently ignores your file while the CLI loads it, the
-  fingerprint changed (you edited since approving) — look in the pending
-  panel. If the CLI *also* ignores it, the script failed to load; the CLI
-  prints why, the app deliberately does not.
+  fingerprint changed (you edited since approving) — look for it pending on
+  the Extensions screen. If the CLI *also* ignores it, the script failed to
+  load; `leaf sources verify` says why, and the Extensions screen shows the
+  same error on the file's row.
 
 ## The rules the format encodes
 
 - One file, one site. `SOURCE.id` is forever: it is stored on every series
   the user adds through you. Pick it once, never reuse it for another site.
+  `user.` means "not built in", not "personal" — scripts from a repository
+  use it too, and an id a built-in already uses is ignored.
 - Never block on interactivity — a script runs on a worker thread answering
   calls; there is no user to ask for credentials. If a site needs a login,
-  the honest answer is a `cookie` string in `opts` you cannot yet populate,
-  so: document it, or don't write that site.
+  document it, or don't write that site.
 - Be polite to the site: one request per call where you can, no scraping
   ahead of what the app asked for. The app already paces its chapter
   downloads; your `page_list` is not the place to pre-fetch.
