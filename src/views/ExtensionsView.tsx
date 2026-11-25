@@ -491,7 +491,9 @@ function InstalledRow({
     <div className="flex flex-col gap-2.5 px-4 py-3.5">
       <div className="flex items-center gap-3 max-sm:flex-wrap">
         <Tile />
-        <div className="min-w-0 flex-1">
+        {/* On a phone the text keeps the row and the actions wrap under it;
+            beside them it was squeezed to a few characters. */}
+        <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-46px)]">
           <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
             <span className="truncate">{broken ? s.file : (s.name ?? s.file)}</span>
             {s.kind && <KindBadge kind={s.kind} t={t} />}
@@ -510,7 +512,7 @@ function InstalledRow({
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 max-sm:ml-[46px]">
+        <div className="flex shrink-0 items-center gap-2 max-sm:ml-[46px] max-sm:w-[calc(100%-46px)] max-sm:justify-end">
           {s.state === "pending" && (
             <Button size="sm" onClick={onApprove} disabled={busy}>
               <ShieldCheck />
@@ -599,7 +601,7 @@ function OfferedRow({
   return (
     <div className="flex items-center gap-3 px-4 py-3.5 max-sm:flex-wrap">
       <Tile />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-46px)]">
         <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
           <span className="truncate">{row.name}</span>
           <KindBadge kind={row.kind} t={t} />

@@ -82,7 +82,7 @@ export function HistoryView({ onRead, onOpenSeries, onBack, onError }: HistoryVi
 
   return (
     <div className="scrollbar-thin h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[880px] flex-col gap-6 px-5 pb-10 pt-6 sm:px-10 sm:pt-8">
+      <div className="mx-auto flex max-w-[880px] flex-col gap-6 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
       <header className="flex flex-col gap-4">
         <Button variant="ghost" size="sm" className="-ml-3 self-start" onClick={onBack}>
           <ArrowLeft />

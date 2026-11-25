@@ -275,6 +275,14 @@
     color: var(--text-tertiary);
   }
 
+  /* A row the thumb swipes sideways: the bar under it is noise on a phone. */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;

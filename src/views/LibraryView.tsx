@@ -214,7 +214,7 @@ export function LibraryView({
       onScroll={scroll.onScroll}
       className="scrollbar-thin h-full overflow-y-auto"
     >
-      <div className="mx-auto flex max-w-[1048px] flex-col gap-6 px-5 pb-10 pt-6 sm:px-10 sm:pt-8">
+      <div className="mx-auto flex max-w-[1048px] flex-col gap-6 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
         <header className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <div className="min-w-0 flex-1">
             <h1 className="type-display max-sm:text-[32px] max-sm:leading-9">
@@ -269,7 +269,7 @@ export function LibraryView({
                 {t("libraryView.seeHistory")}
               </Button>
             </div>
-            <div className="scrollbar-thin -mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
+            <div className="scrollbar-none -mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
               {continuing.slice(0, CONTINUE_COUNT).map((entry) => (
                 <ContinueCard
                   key={entry.series_id}
@@ -288,7 +288,7 @@ export function LibraryView({
               <div
                 role="radiogroup"
                 aria-label={t("libraryView.series")}
-                className="scrollbar-thin flex gap-1.5 overflow-x-auto max-sm:-mx-5 max-sm:w-screen max-sm:px-5"
+                className="scrollbar-none flex gap-1.5 overflow-x-auto max-sm:-mx-5 max-sm:w-screen max-sm:px-5"
               >
                 {slices.map((s) => (
                   <Chip

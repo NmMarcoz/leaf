@@ -63,7 +63,14 @@ export function SettingsRow({
         )}
       </Text>
       {children && (
-        <div className={cn("flex shrink-0 items-center gap-2", stack && "w-full")}>{children}</div>
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-2 max-sm:min-w-0 max-sm:max-w-full",
+            stack && "w-full",
+          )}
+        >
+          {children}
+        </div>
       )}
     </div>
   );
@@ -105,7 +112,7 @@ export function Pane({
 }) {
   return (
     <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-      <div className="flex max-w-[800px] flex-col gap-6 px-5 pb-10 pt-6 md:px-9 md:pt-10">
+      <div className="flex max-w-[800px] flex-col gap-6 px-5 pb-10 pt-5 md:px-9 md:pt-10">
         <header className="flex items-center gap-4">
           <h2 className="type-subtitle flex-1">{title}</h2>
           {status}
