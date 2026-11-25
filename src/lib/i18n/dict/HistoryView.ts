@@ -6,6 +6,7 @@ const dict: PartialDictionary = {
     "historyView.subtitle":
       "What you read and in what order, whether the pages came off disk or from the source.",
     "historyView.refresh": "Refresh",
+    "historyView.back": "Shelf",
     "historyView.clear": "Clear",
     "historyView.loading": "Loading…",
     "historyView.emptyTitle": "Nothing read yet",
@@ -32,6 +33,7 @@ const dict: PartialDictionary = {
     "historyView.subtitle":
       "O que você leu e em que ordem, seja com as páginas em disco ou vindas da fonte.",
     "historyView.refresh": "Atualizar",
+    "historyView.back": "Estante",
     "historyView.clear": "Limpar",
     "historyView.loading": "Carregando…",
     "historyView.emptyTitle": "Nada lido ainda",

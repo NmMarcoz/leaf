@@ -17,10 +17,11 @@ export const Chip = React.forwardRef<
     role="radio"
     aria-checked={selected}
     className={cn(
-      "inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+      // Figma "v2/Chip de filtro": active is solid ink, the rest an outline.
       selected
-        ? "border-primary bg-primary/15 font-medium text-primary"
-        : "border-border text-foreground hover:bg-accent",
+        ? "border-strong bg-strong text-on-strong"
+        : "border-line text-text-secondary hover:border-line-strong hover:bg-hover",
       className,
     )}
     {...props}
@@ -49,15 +50,15 @@ export function OptionCard({
       aria-checked={selected}
       className={cn(
         "flex w-full flex-col gap-0.5 rounded-lg border px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        selected ? "border-primary bg-primary/10" : "border-border hover:bg-accent",
+        selected ? "border-strong bg-sunken" : "border-line bg-raised hover:bg-hover",
         className,
       )}
       {...props}
     >
-      <span className={cn("text-xs font-medium", selected ? "text-primary" : "text-foreground")}>
+      <span className="text-sm font-medium text-foreground">
         {title}
       </span>
-      {detail && <span className="text-[11px] leading-relaxed text-muted-foreground">{detail}</span>}
+      {detail && <span className="text-xs leading-4 text-text-secondary">{detail}</span>}
     </button>
   );
 }

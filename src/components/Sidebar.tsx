@@ -1,50 +1,39 @@
-import { useCallback, useState } from "react";
-import {
-  BookOpen,
-  CloudDownload,
-  Clock,
-  Compass,
-  Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Puzzle,
-  Send,
-  Settings,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpen, ChevronRight, Compass, ListChecks, Settings } from "lucide-react";
 
 import type { UpdateStage } from "@/hooks/useUpdater";
 import { LogoMark } from "@/components/Logo";
 import { useT } from "@/lib/i18n";
 import type { Translator } from "@/lib/i18n/types";
 import { canSendToDevice } from "@/lib/platform";
+import { sendConfig } from "@/lib/send";
 import { cn } from "@/lib/utils";
 
-/** Top-level destinations. A series or the editor both live under the library. */
-export type Section = "library" | "explore" | "history" | "send" | "extensions" | "settings";
+/**
+ * Top-level destinations. A series, the editor and history all live under the
+ * shelf; devices and extensions are pages of Settings.
+ */
+export type Section = "library" | "explore" | "tasks" | "settings";
 
 /**
  * Where the app's navigation sits.
  *
  * `rail` is the desktop column. `bar` is the phone's bottom row, which is not
  * the same control turned sideways: a thumb reaches the bottom of a phone and
- * nothing else, so the items get wider targets, always-on labels, and none of
- * the rail's chrome-management affordances.
+ * nothing else, so the items get wider targets and always-on labels.
  */
 export type NavVariant = "rail" | "bar";
 
 interface SidebarProps {
   active: Section;
   onNavigate: (to: Section) => void;
+  /** Opens Settings on the Devices page, from the export card. */
+  onOpenDevices: () => void;
   updateStage: UpdateStage;
-  onCheckUpdates: () => void;
+  /** Queued and running tasks — the badge on Tasks. */
+  activeTasks: number;
   variant?: NavVariant;
 }
-
-// The bottom bar has no room for a check-for-updates entry and no sensible
-// place to put one; on a phone that lives in Settings instead.
-
-/** Remembered across launches; purely chrome, so it does not belong in settings. */
-const EXPANDED_KEY = "leaf:sidebar-expanded";
 
 interface Destination {
   section: Section;
@@ -52,213 +41,187 @@ interface Destination {
   label: string;
 }
 
-function destinations(t: Translator): Destination[] {
-  const all: Destination[] = [
-    { section: "library", icon: <BookOpen className="size-4" />, label: t("sidebar.library") },
-    { section: "explore", icon: <Compass className="size-4" />, label: t("sidebar.explore") },
-    { section: "history", icon: <Clock className="size-4" />, label: t("sidebar.history") },
-    {
-      section: "send",
-      icon: <Send className="size-4" />,
-      label: t("sidebar.sendToKindle"),
-    },
-    { section: "settings", icon: <Settings className="size-4" />, label: t("sidebar.settings") },
+/** Settings is apart from these: it sits at the bottom of the rail. */
+function primary(t: Translator): Destination[] {
+  return [
+    { section: "library", icon: <BookOpen />, label: t("sidebar.library") },
+    { section: "explore", icon: <Compass />, label: t("sidebar.explore") },
+    { section: "tasks", icon: <ListChecks />, label: t("sidebar.tasks") },
   ];
-  // Extensions sit just above Settings: both are about the app itself rather
-  // than the collection, and the entry only earns its rail space once there
-  // is a folder that can hold something. (There always can — surveying an
-  // empty folder is free — so unlike Send, it is never filtered out.)
-  all.splice(all.length - 1, 0, {
-    section: "extensions",
-    icon: <Puzzle className="size-4" />,
-    label: t("sidebar.extensions"),
-  });
-  return all.filter((d) => d.section !== "send" || canSendToDevice);
 }
 
 /**
  * The app's navigation.
  *
- * As a rail it is collapsed to icons by default, because the volume editor wants
- * every pixel it can get — a page grid and a metadata panel already compete for
- * the width. Expanding is one click and is remembered.
+ * The rail is ink on paper — the chrome is the one dark thing in a light
+ * window — with Settings and the default device at its foot. Below `lg` it
+ * folds to icons, because the volume editor wants the width more than the
+ * labels do; there is no toggle, the window size decides.
  */
 export function Sidebar({
   active,
   onNavigate,
+  onOpenDevices,
   updateStage,
-  onCheckUpdates,
+  activeTasks,
   variant = "rail",
 }: SidebarProps) {
   const t = useT();
-  const [expanded, setExpanded] = useState(
-    () => localStorage.getItem(EXPANDED_KEY) === "true",
-  );
-
-  const toggle = useCallback(() => {
-    setExpanded((current) => {
-      localStorage.setItem(EXPANDED_KEY, String(!current));
-      return !current;
-    });
-  }, []);
+  // A pip on Settings rather than an entry of its own: updates live on the
+  // General page now, and there is only ever one to take.
+  const updatePip = updateStage === "available" || updateStage === "installed";
 
   if (variant === "bar") {
+    const all: Destination[] = [
+      ...primary(t),
+      { section: "settings", icon: <Settings />, label: t("sidebar.settings") },
+    ];
     return (
       <nav
-        className="flex shrink-0 items-stretch border-t border-border bg-card/80 backdrop-blur"
+        className="flex shrink-0 items-stretch border-t border-white/5 bg-ink text-on-ink-muted"
         // Android's gesture bar is already padded around by the activity; this
         // is for a platform that reports it to CSS instead, and is zero here.
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        {destinations(t).map((d) => (
-          <Tab
+        {all.map((d) => (
+          <button
             key={d.section}
-            icon={d.icon}
-            label={d.section === "send" ? t("sidebar.send") : d.label}
-            active={active === d.section}
             onClick={() => onNavigate(d.section)}
-          />
+            aria-label={d.label}
+            aria-current={active === d.section ? "page" : undefined}
+            className={cn(
+              "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 pb-2 pt-2.5 text-[11px] font-medium transition-colors",
+              active === d.section ? "text-on-ink" : "text-on-ink-muted",
+            )}
+          >
+            <span
+              className={cn(
+                "relative flex h-7 w-14 items-center justify-center rounded-full transition-colors [&_svg]:size-[18px]",
+                active === d.section && "bg-ink-raised",
+              )}
+            >
+              {d.icon}
+              {d.section === "tasks" && activeTasks > 0 && (
+                <span className="absolute -top-1 right-1.5 rounded-full bg-deliver px-1.5 text-[10px] leading-4 text-on-deliver">
+                  {activeTasks}
+                </span>
+              )}
+              {d.section === "settings" && updatePip && (
+                <span className="absolute right-3.5 top-0.5 size-1.5 rounded-full bg-deliver" />
+              )}
+            </span>
+            <span className="max-w-full truncate">{d.label}</span>
+          </button>
         ))}
       </nav>
     );
   }
 
   return (
-    <nav
-      className={cn(
-        "flex shrink-0 flex-col border-r border-border bg-card/40 py-2 transition-[width] duration-150",
-        expanded ? "w-44" : "w-14",
-      )}
-    >
-      <div
-        className={cn(
-          "flex items-center gap-2 pb-3 pt-1",
-          expanded ? "px-3" : "justify-center px-2",
-        )}
-      >
-        <LogoMark width={36} title="Leaf" />
-        {expanded && (
-          <span className="font-brand text-xl font-medium leading-none tracking-[0.04em]">leaf</span>
-        )}
+    <nav className="flex w-[72px] shrink-0 flex-col gap-1 bg-ink px-3 pb-4 pt-5 text-on-ink-muted lg:w-[232px] lg:px-4">
+      <div className="flex items-center gap-2.5 px-1 pb-5 max-lg:justify-center">
+        <LogoMark width={44} title="Leaf" />
+        <span className="font-brand text-[28px] font-medium leading-none tracking-[0.04em] text-on-ink max-lg:hidden">
+          leaf
+        </span>
       </div>
 
-      <div className="flex flex-col gap-1 px-2">
-        {destinations(t).map((d) => (
-          <Item
-            key={d.section}
-            icon={d.icon}
-            label={d.label}
-            expanded={expanded}
-            active={active === d.section}
-            onClick={() => onNavigate(d.section)}
-          />
-        ))}
-      </div>
+      {primary(t).map((d) => (
+        <Item
+          key={d.section}
+          {...d}
+          active={active === d.section}
+          onClick={() => onNavigate(d.section)}
+          count={d.section === "tasks" ? activeTasks : 0}
+        />
+      ))}
 
-      <div className="mt-auto flex flex-col gap-1 px-2">
-        <Item
-          icon={
-            updateStage === "checking" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <CloudDownload className="size-4" />
-            )
-          }
-          label={updateStage === "uptodate" ? t("sidebar.upToDate") : t("sidebar.checkForUpdates")}
-          expanded={expanded}
-          active={false}
-          disabled={updateStage === "checking"}
-          onClick={onCheckUpdates}
-          // A pip rather than a number: there is only ever one update to take.
-          badge={updateStage === "available" || updateStage === "installed"}
-        />
-        <Item
-          icon={
-            expanded ? (
-              <PanelLeftClose className="size-4" />
-            ) : (
-              <PanelLeftOpen className="size-4" />
-            )
-          }
-          label={t("sidebar.collapse")}
-          expanded={expanded}
-          active={false}
-          onClick={toggle}
-        />
-      </div>
+      <div className="flex-1" />
+
+      <Item
+        section="settings"
+        icon={<Settings />}
+        label={t("sidebar.settings")}
+        active={active === "settings"}
+        onClick={() => onNavigate("settings")}
+        pip={updatePip}
+      />
+      {canSendToDevice && <DeviceCard onClick={onOpenDevices} />}
     </nav>
-  );
-}
-
-/** One bottom-bar tab: a thumb-sized target with its label always showing. */
-function Tab({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      aria-current={active ? "page" : undefined}
-      className={cn(
-        "flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] transition-colors",
-        active ? "text-primary" : "text-muted-foreground",
-      )}
-    >
-      <span className="shrink-0">{icon}</span>
-      <span className="truncate">{label}</span>
-    </button>
   );
 }
 
 function Item({
   icon,
   label,
-  expanded,
   active,
-  disabled,
-  badge,
+  count = 0,
+  pip = false,
   onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  expanded: boolean;
+}: Destination & {
   active: boolean;
-  disabled?: boolean;
-  badge?: boolean;
+  count?: number;
+  pip?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
-      // Collapsed, the label is the only thing naming the control, so it has to
-      // reach a screen reader and a hover tooltip both.
-      title={expanded ? undefined : label}
+      // Folded to icons, the label is the only thing naming the control.
+      title={label}
       aria-label={label}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-xs transition-colors",
-        expanded ? "justify-start" : "justify-center",
-        active
-          ? "bg-primary/10 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        disabled && "cursor-not-allowed opacity-50",
+        "relative flex h-10 items-center gap-3 rounded-[10px] px-3 text-sm font-medium transition-colors max-lg:justify-center [&_svg]:size-4 [&_svg]:shrink-0",
+        active ? "bg-ink-raised text-on-ink" : "hover:bg-ink-raised hover:text-on-ink",
       )}
     >
-      <span className="relative shrink-0">
-        {icon}
-        {badge && (
-          <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary" />
-        )}
+      {icon}
+      <span className="flex-1 truncate text-left max-lg:hidden">{label}</span>
+      {count > 0 && (
+        <span className="rounded-full bg-deliver px-[7px] text-xs leading-4 text-on-deliver max-lg:absolute max-lg:right-1 max-lg:top-1 max-lg:px-1 max-lg:text-[10px]">
+          {count}
+        </span>
+      )}
+      {pip && <span className="absolute left-6 top-2.5 size-1.5 rounded-full bg-deliver" />}
+    </button>
+  );
+}
+
+/**
+ * Where a built volume goes by default — the design's "Export to" card.
+ *
+ * There is one device today, the Kindle address mail is sent to; the card
+ * names it, or invites setting it up, and opens Devices either way.
+ */
+function DeviceCard({ onClick }: { onClick: () => void }) {
+  const t = useT();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    sendConfig()
+      .then((status) => setEmail(status.config.kindle_email.trim() || ""))
+      .catch(() => setEmail(""));
+  }, []);
+
+  if (email === null) return null;
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col gap-1.5 rounded-xl bg-ink-raised p-3 text-left max-lg:hidden"
+    >
+      <span className="font-mono text-[11px] font-medium uppercase leading-[14px] tracking-[0.06em]">
+        {t("sidebar.exportTo")}
       </span>
-      {expanded && <span className="truncate">{label}</span>}
+      <span className="flex w-full items-center gap-1.5 text-xs font-medium text-on-ink">
+        <span className="min-w-0 flex-1 truncate">
+          {email ? t("sidebar.kindle") : t("sidebar.noDevice")}
+        </span>
+        <ChevronRight className="size-3.5 shrink-0" />
+      </span>
+      <span className="truncate text-xs" title={email || undefined}>
+        {email ? t("sidebar.byEmail", { email }) : t("sidebar.setUpDevice")}
+      </span>
     </button>
   );
 }
