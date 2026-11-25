@@ -136,9 +136,8 @@ pub async fn download_chapter(
     .await
 }
 
-/// Download a chapter straight from the source that indexed it — MangaDex,
-/// or a registered `Source` (built-in beyond the metadata pair, or a `.lua`
-/// extension).
+/// Download a chapter straight from the source that indexed it, through the
+/// reader extension that serves its pages (see `ChapterSource`).
 ///
 /// Much better than reading a page when the source will do it: no rendering, no
 /// guessing which `<img>` is a page, and the order is the publisher's own. Only
@@ -160,8 +159,7 @@ pub async fn download_chapter_from_source(
             );
         };
 
-        // The image server is handed out per request and expires (MangaDex)
-        // or is fetched fresh from the site (an extension), so this is
+        // Image servers can be handed out per request and expire, so this is
         // resolved immediately before downloading rather than stored.
         let (pages, referer) = ChapterSource::resolve(&app, series.source.as_deref())?.page_list(&chapter_id)?;
 
@@ -346,39 +344,26 @@ fn summarise(downloaded: &[String], failed: &[BatchFailure]) -> String {
     }
 }
 
-/// Where a batch's page images come from: MangaDex/Kitsu, or a registered
-/// `Source`. Resolved once before the loop rather than per chapter — a
-/// registered source means loading every `.lua` extension, which fifty
-/// chapters have no reason to repeat fifty times.
-enum ChapterSource {
-    Meta(leaf_meta::Source),
-    Registered(std::sync::Arc<dyn leaf_extensions::Source>),
-}
+/// Where a series' page images come from: the reader for its source, per
+/// `Registry::reader_for` — the source itself when it is a reader, else an
+/// installed reader declaring the same site (how a MangaDex series reads).
+/// The app fetches no pages of its own. Resolved once before a batch's loop
+/// rather than per chapter — it means loading every `.lua` extension, which
+/// fifty chapters have no reason to repeat fifty times.
+struct ChapterSource(std::sync::Arc<dyn leaf_extensions::ReaderSource>);
 
 impl ChapterSource {
     fn resolve(app: &AppHandle, source: Option<&str>) -> anyhow::Result<Self> {
         let Some(name) = source else {
             anyhow::bail!("this series has no source to download from");
         };
-        if let Some(meta_source) = crate::util::parse_meta_source(name) {
-            return Ok(Self::Meta(meta_source));
-        }
-        let registry = crate::sources::load_registry(app)?;
-        let source = registry
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("{name:?} is not a registered source"))?;
-        Ok(Self::Registered(source))
+        Ok(Self(crate::sources::load_registry(app)?.reader_for(name)?))
     }
 
     /// Handed out per request and possibly expiring, so resolved immediately
     /// before each chapter's download rather than cached across the batch.
     fn page_list(&self, chapter_id: &str) -> anyhow::Result<(Vec<String>, Option<String>)> {
-        match self {
-            Self::Meta(source) => Ok((leaf_meta::chapter_pages(*source, chapter_id)?, None)),
-            Self::Registered(source) => {
-                Ok((source.page_list(chapter_id)?, Some(source.info().base_url.clone())))
-            }
-        }
+        Ok((self.0.page_list(chapter_id)?, Some(self.0.info().base_url.clone())))
     }
 }
 

@@ -2331,6 +2331,8 @@ dependencies = [
  "leaf-fetch",
  "leaf-library",
  "leaf-meta",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

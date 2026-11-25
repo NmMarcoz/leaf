@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Format, Volume } from "@/lib/api";
+import type { ExtensionRepo, Format, Volume } from "@/lib/api";
 
 /** Mirrors `settings::Settings`. */
 export interface Settings {
@@ -30,6 +30,8 @@ export interface Settings {
   approved_extensions: string[];
   dev_extensions: string[];
   disabled_extensions: string[];
+  /** Same reasoning: carried so a Settings round-trip keeps them. */
+  extension_repos: ExtensionRepo[];
 }
 
 /** Mirrors `leaf_core::Compression`. */

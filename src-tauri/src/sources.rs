@@ -8,7 +8,8 @@
 //! `.lua` files is cheap next to the SQLite/HTTP work each command already does.
 
 use anyhow::{anyhow, Result};
-use leaf_extensions::{MangaDetails, MangasPage, Registry, SourceInfo, UserScript};
+use leaf_extensions::repo::{self, RepoRow};
+use leaf_extensions::{MangaDetails, MangasPage, MetadataSource, Registry, SourceInfo, UserScript};
 use leaf_library::model::{NewSeries, PublishedChapter, PublishedVolume};
 use leaf_library::{Library, Series, SeriesId};
 use leaf_meta::VolumeChapters;
@@ -265,10 +266,12 @@ pub async fn lock_extension(app: AppHandle, file: String) -> Result<String, Stri
     .await
 }
 
-/// Every registered source, for an Add-from-source picker.
+/// Every registered catalogue, for the Add-from-source and Explore pickers.
+/// Enrichers and page-only readers have nothing to browse, so they are not
+/// offered there.
 #[tauri::command]
 pub async fn list_sources(app: AppHandle) -> Result<Vec<SourceInfo>, String> {
-    blocking(move || Ok(load_registry(&app)?.all())).await
+    blocking(move || Ok(load_registry(&app)?.catalogues())).await
 }
 
 /// Search one registered source's own catalogue.
@@ -281,9 +284,7 @@ pub async fn search_source(
 ) -> Result<MangasPage, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
-        let source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+        let source = registry.metadata(&source)?;
         source.search(&query, page)
     })
     .await
@@ -298,9 +299,7 @@ pub async fn popular_source(
 ) -> Result<MangasPage, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
-        let source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+        let source = registry.metadata(&source)?;
         source.popular(page)
     })
     .await
@@ -315,9 +314,7 @@ pub async fn latest_source(
 ) -> Result<MangasPage, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
-        let source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+        let source = registry.metadata(&source)?;
         source.latest(page)
     })
     .await
@@ -334,9 +331,7 @@ pub async fn manga_details_source(
 ) -> Result<MangaDetails, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
-        let source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+        let source = registry.metadata(&source)?;
         source.manga_details(&external_id)
     })
     .await
@@ -353,9 +348,7 @@ pub async fn volumes_source(
 ) -> Result<Vec<VolumeChapters>, String> {
     blocking(move || {
         let registry = load_registry(&app)?;
-        let source = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+        let source = registry.metadata(&source)?;
         source.volumes(&external_id, None)
     })
     .await
@@ -375,7 +368,7 @@ pub async fn volumes_source(
 /// panel says so.
 ///
 /// `fallback_title` is the title from the catalogue listing, used until the
-/// source's own detail page answers (see `MangaDetails::best_effort` in the
+/// source's own detail page answers (see `Registry::best_effort` in the
 /// task, which overwrites it with what it finds).
 #[tauri::command]
 pub async fn add_series_from_source(
@@ -389,9 +382,7 @@ pub async fn add_series_from_source(
         // itself ("that source does not exist"), and it is disk-and-VM work,
         // not network.
         let registry = load_registry(&app)?;
-        if registry.get(&source).is_none() {
-            return Err(anyhow!("{source:?} is not a registered source"));
-        }
+        registry.metadata(&source)?;
 
         let mut library = Library::open(settings::library_root(&app)?)?;
         let added = library.add_series(NewSeries {
@@ -433,9 +424,7 @@ pub async fn add_series_from_source(
             }
             progress.step("chapter list", 1, 2);
             let registry = load_registry(&app)?;
-            let ext_source = registry
-                .get(&source)
-                .ok_or_else(|| anyhow!("{source:?} is not a registered source"))?;
+            let ext_source = registry.metadata(&source)?;
             let mut library = Library::open(settings::library_root(&app)?)?;
             let title = library.series(series_id)?.title;
             match pull_layout(&mut library, series_id, ext_source.as_ref(), &external_id, &title) {
@@ -468,7 +457,7 @@ pub async fn add_series_from_source(
 pub(crate) fn pull_layout(
     library: &mut Library,
     id: SeriesId,
-    source: &dyn leaf_extensions::Source,
+    source: &dyn MetadataSource,
     source_id: &str,
     title: &str,
 ) -> Result<leaf_library::SyncReport> {
@@ -514,4 +503,115 @@ pub(crate) fn pull_layout(
         .collect();
 
     library.sync_layout(id, &volumes)
+}
+
+/* ------------------------------------------------------- extension repositories */
+
+/// The repositories the user added, in the order added.
+#[tauri::command]
+pub async fn list_extension_repos(app: AppHandle) -> Result<Vec<settings::ExtensionRepo>, String> {
+    blocking(move || Ok(settings::load(&app)?.extension_repos)).await
+}
+
+/// Add a repository by the address the user typed. Its index is fetched
+/// first, so an address that is not a readable repository is refused here
+/// rather than stored and failing on every later visit.
+#[tauri::command]
+pub async fn add_extension_repo(app: AppHandle, url: String) -> Result<settings::ExtensionRepo, String> {
+    blocking(move || {
+        let fetched = repo::fetch_index(&url)?;
+        let mut settings = settings::load(&app)?;
+        if let Some(existing) = settings.extension_repos.iter().find(|r| r.url == fetched.url) {
+            return Ok(existing.clone());
+        }
+        let added = settings::ExtensionRepo {
+            url: fetched.url,
+            name: fetched.index.name,
+            added_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default(),
+        };
+        settings.extension_repos.push(added.clone());
+        settings::save(&app, &settings)?;
+        Ok(added)
+    })
+    .await
+}
+
+/// Forget a repository. Scripts installed from it stay: they are files in
+/// the user's folder, approved or not on their own merits.
+#[tauri::command]
+pub async fn remove_extension_repo(app: AppHandle, url: String) -> Result<(), String> {
+    blocking(move || {
+        let mut settings = settings::load(&app)?;
+        settings.extension_repos.retain(|r| r.url != url);
+        settings::save(&app, &settings)
+    })
+    .await
+}
+
+/// One repository's index against the extensions folder.
+#[derive(serde::Serialize)]
+pub struct RepoBrowse {
+    pub url: String,
+    pub name: Option<String>,
+    pub rows: Vec<RepoRow>,
+    /// Entries this build does not understand and so does not offer.
+    pub skipped: usize,
+}
+
+/// Fetch a repository's index and compare it with what is installed.
+#[tauri::command]
+pub async fn browse_extension_repo(app: AppHandle, url: String) -> Result<RepoBrowse, String> {
+    blocking(move || {
+        let fetched = repo::fetch_index(&url)?;
+        let root = settings::library_root(&app)?;
+        let settings = settings::load(&app)?;
+        let rows = repo::browse(&root.join("extensions"), &fetched.index, &governance(&settings));
+        Ok(RepoBrowse {
+            url: fetched.url,
+            name: fetched.index.name,
+            rows,
+            skipped: fetched.skipped,
+        })
+    })
+    .await
+}
+
+/// Install or update one script from a repository.
+///
+/// The index is fetched again rather than taken from the caller: what gets
+/// verified is what the repository says *now*, not what a panel opened an
+/// hour ago remembered. The file lands pending — this never approves.
+///
+/// That includes dev mode. Dev mode is keyed by filename, so a repository
+/// update landing on a file the user once developed would otherwise run a
+/// stranger's new bytes with no approval at all; the filename leaves the dev
+/// list here. (A file the user picks by hand keeps dev mode: that is the
+/// author's own save loop.)
+#[tauri::command]
+pub async fn install_from_extension_repo(
+    app: AppHandle,
+    url: String,
+    id: String,
+) -> Result<String, String> {
+    blocking(move || {
+        let fetched = repo::fetch_index(&url)?;
+        let script = fetched
+            .index
+            .scripts
+            .iter()
+            .find(|s| s.id == id)
+            .ok_or_else(|| anyhow!("{id:?} is no longer in this repository"))?;
+        let root = settings::library_root(&app)?;
+        let name = repo::install(&root.join("extensions"), &fetched.url, script)?;
+        let mut settings = settings::load(&app)?;
+        if settings.dev_extensions.iter().any(|f| f == &name) {
+            settings.dev_extensions.retain(|f| f != &name);
+            settings::save(&app, &settings)?;
+        }
+        Ok(name)
+    })
+    .await
 }

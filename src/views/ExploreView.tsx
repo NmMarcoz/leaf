@@ -279,13 +279,17 @@ function MangaDexExplore({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b border-border bg-card/60 px-5 py-3">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card/60 px-5 py-3">
         <h1 className="mr-2 text-sm font-semibold">{t("exploreView.title")}</h1>
         {sourcePicker}
+        {/* A floor on its width, and a header that wraps: a phone-width row
+            otherwise squeezes this to just its clear button, and a field with
+            no room for text keeps the caret at 0, so every letter lands in
+            front of the last ("Ichi" typed in arrives as "ihcI"). */}
         <Input
           value={text}
           placeholder={t("exploreView.searchPlaceholder")}
-          className="max-w-sm"
+          className="min-w-40 max-w-sm flex-1"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") submitSearch();
@@ -517,7 +521,7 @@ function RegisteredSourceExplore({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b border-border bg-card/60 px-5 py-3">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card/60 px-5 py-3">
         <h1 className="mr-2 text-sm font-semibold">{t("exploreView.title")}</h1>
         <SourcePicker value={sourceId} sources={sources} onChange={onSourceChange} />
 
@@ -541,7 +545,7 @@ function RegisteredSourceExplore({
         <Input
           value={text}
           placeholder={t("exploreView.searchSourcePlaceholder")}
-          className="max-w-sm"
+          className="min-w-40 max-w-sm flex-1"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") submitSearch();

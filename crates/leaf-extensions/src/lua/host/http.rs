@@ -195,14 +195,14 @@ mod tests {
 
     #[test]
     fn an_undeclared_origin_is_refused_before_any_socket() {
-        let allowed = vec!["https://mangataro.org".to_string()];
+        let allowed = vec!["https://manga.example.com".to_string()];
         let err = check_origin("http://169.254.169.254/latest", &allowed).unwrap_err();
         assert!(err.to_string().contains("declared origins"));
     }
 
     #[test]
     fn a_declared_origin_passes_the_pin() {
-        let allowed = vec!["https://mangataro.org".to_string()];
-        assert!(check_origin("https://mangataro.org/manga/1", &allowed).is_ok());
+        let allowed = vec!["https://manga.example.com".to_string()];
+        assert!(check_origin("https://manga.example.com/manga/1", &allowed).is_ok());
     }
 }

@@ -193,8 +193,12 @@ export function AddFromSourceDialog({ open, onOpenChange, onAdded }: AddFromSour
                             {p.name} <span className="text-muted-foreground">({p.file})</span>
                           </p>
                           <p className="truncate text-xs text-muted-foreground" dir="ltr">
-                            {p.base_url}
+                            {[p.base_url, ...(p.mirrors ?? [])].join(" · ")}
                           </p>
+                          {/* The kind is what the approval actually grants. */}
+                          {p.kind && (
+                            <p className="text-xs">{t(`extensionsView.kindHint.${p.kind}`)}</p>
+                          )}
                         </div>
                         <Button
                           size="sm"
