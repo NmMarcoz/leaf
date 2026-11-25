@@ -4,8 +4,8 @@ const dict: PartialDictionary = {
   en: {
     "sourceSeriesModal.unknownAuthor": "Unknown author",
     "sourceSeriesModal.chaptersCount": "{count} chapters.",
-    "sourceSeriesModal.inLibrary": "In your library",
-    "sourceSeriesModal.addToLibrary": "Add to library",
+    "sourceSeriesModal.inLibrary": "On your shelf",
+    "sourceSeriesModal.addToLibrary": "Add to shelf",
     "sourceSeriesModal.loadingChapters": "Loading chapters…",
     "sourceSeriesModal.noChapters": "No chapters found.",
     "sourceSeriesModal.volumeHeading": "Volume {number} · {count}",
@@ -19,8 +19,8 @@ const dict: PartialDictionary = {
   "pt-BR": {
     "sourceSeriesModal.unknownAuthor": "Autor desconhecido",
     "sourceSeriesModal.chaptersCount": "{count} capítulos.",
-    "sourceSeriesModal.inLibrary": "Já está na sua biblioteca",
-    "sourceSeriesModal.addToLibrary": "Adicionar à biblioteca",
+    "sourceSeriesModal.inLibrary": "Já está na sua estante",
+    "sourceSeriesModal.addToLibrary": "Adicionar à estante",
     "sourceSeriesModal.loadingChapters": "Carregando capítulos…",
     "sourceSeriesModal.noChapters": "Nenhum capítulo encontrado.",
     "sourceSeriesModal.volumeHeading": "Volume {number} · {count}",

@@ -13,6 +13,10 @@ const dict: PartialDictionary = {
     "settingsView.loading": "Loading…",
 
     "settingsView.appearance": "Appearance",
+    "settingsView.whatsNew": "What's new",
+    "settingsView.language": "Language",
+    "settingsView.languageDetail": "The app's own text. A series keeps the language it was published in.",
+    "settingsView.languageSystem": "Same as the system",
     "settingsView.theme": "Theme",
     "settingsView.themeDetail": "Paper in light, ink-green in dark.",
     "settingsView.themeSystem": "System",
@@ -97,6 +101,10 @@ const dict: PartialDictionary = {
     "settingsView.loading": "Carregando…",
 
     "settingsView.appearance": "Aparência",
+    "settingsView.whatsNew": "Novidades",
+    "settingsView.language": "Idioma",
+    "settingsView.languageDetail": "Os textos do próprio app. Uma série mantém o idioma em que foi publicada.",
+    "settingsView.languageSystem": "Igual ao sistema",
     "settingsView.theme": "Tema",
     "settingsView.themeDetail": "Papel no claro, verde-nanquim no escuro.",
     "settingsView.themeSystem": "Sistema",

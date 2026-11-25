@@ -218,6 +218,7 @@ function CoverPreview({ path }: { path: string | null }) {
 }
 
 function CoverImage({ path }: { path: string }) {
+  const t = useT();
   const { ref, url } = useThumbnail(path, 560);
   return (
     <div
@@ -227,7 +228,7 @@ function CoverImage({ path }: { path: string }) {
       {url && (
         <img
           src={url}
-          alt="Cover"
+          alt={t("metadataPanel.cover")}
           draggable={false}
           className="max-h-full max-w-full object-contain"
         />

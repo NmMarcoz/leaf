@@ -136,6 +136,12 @@ pub struct Settings {
     /// every fresh install.
     #[serde(default)]
     pub extension_repos: Vec<ExtensionRepo>,
+    /// The language of the app's own text (`"en"`, `"pt-BR"`). `None` means
+    /// follow the system, which is also what an older file says — the choice
+    /// is only stored once the user makes one. A series keeps whatever
+    /// language it was published in either way.
+    #[serde(default)]
+    pub ui_language: Option<String>,
 }
 
 /// The on-disk shape. Every field optional so an older file still loads.
@@ -156,6 +162,7 @@ struct Stored {
     dev_extensions: Option<Vec<String>>,
     disabled_extensions: Option<Vec<String>>,
     extension_repos: Option<Vec<ExtensionRepo>>,
+    ui_language: Option<String>,
 }
 
 pub fn load(app: &AppHandle) -> Result<Settings> {
@@ -197,6 +204,7 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
         dev_extensions: stored.dev_extensions.unwrap_or_default(),
         disabled_extensions: stored.disabled_extensions.unwrap_or_default(),
         extension_repos: stored.extension_repos.unwrap_or_default(),
+        ui_language: stored.ui_language,
     })
 }
 
@@ -220,6 +228,7 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
             dev_extensions: Some(next.dev_extensions.clone()),
             disabled_extensions: Some(next.disabled_extensions.clone()),
             extension_repos: Some(next.extension_repos.clone()),
+            ui_language: next.ui_language.clone(),
         },
     )
 }

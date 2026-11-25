@@ -2,6 +2,7 @@ import { Layers, ScrollText } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { includedPages, type Volume } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 interface ChapterSidebarProps {
@@ -12,13 +13,14 @@ interface ChapterSidebarProps {
 }
 
 export function ChapterSidebar({ volume, active, onSelect }: ChapterSidebarProps) {
+  const t = useT();
   const total = volume.chapters.reduce((n, c) => n + includedPages(c).length, 0);
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card/40">
       <div className="px-3 pb-2 pt-4">
         <h2 className="px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Chapters
+          {t("chapterSidebar.chapters")}
         </h2>
       </div>
 
@@ -33,7 +35,7 @@ export function ChapterSidebar({ volume, active, onSelect }: ChapterSidebarProps
           )}
         >
           <Layers className="size-4 shrink-0" />
-          <span className="flex-1 truncate font-medium">All pages</span>
+          <span className="flex-1 truncate font-medium">{t("chapterSidebar.allPages")}</span>
           <Badge variant="outline">{total}</Badge>
         </button>
 
@@ -56,7 +58,7 @@ export function ChapterSidebar({ volume, active, onSelect }: ChapterSidebarProps
               {excluded > 0 && (
                 <span
                   className="size-1.5 shrink-0 rounded-full bg-amber-500"
-                  title={`${excluded} excluded`}
+                  title={t("chapterSidebar.excludedCount", { count: excluded })}
                 />
               )}
               <span className="shrink-0 font-mono text-[11px] text-muted-foreground">

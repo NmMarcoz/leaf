@@ -12,6 +12,23 @@ export const LANGUAGES: { value: Language; label: string }[] = [
 
 export const DEFAULT_LANGUAGE: Language = "en";
 
+/**
+ * The language to show, from what the user chose (`null` = follow the
+ * system). The system's preferences are walked in order and the first one
+ * this build has strings for wins — any Portuguese means pt-BR, the one
+ * Portuguese there is. Anything unrecognised falls back to English.
+ */
+export function resolveLanguage(choice: string | null | undefined): Language {
+  if (choice === "en" || choice === "pt-BR") return choice;
+  const wanted = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const tag of wanted) {
+    const lower = (tag ?? "").toLowerCase();
+    if (lower.startsWith("pt")) return "pt-BR";
+    if (lower.startsWith("en")) return "en";
+  }
+  return DEFAULT_LANGUAGE;
+}
+
 type Vars = Record<string, string | number>;
 
 const interpolate = (template: string, vars?: Vars): string =>

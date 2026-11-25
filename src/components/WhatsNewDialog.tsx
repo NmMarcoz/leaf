@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ChangelogEntry } from "@/lib/changelog";
+import { useT } from "@/lib/i18n";
 
 interface WhatsNewDialogProps {
   open: boolean;
@@ -27,6 +28,7 @@ interface WhatsNewDialogProps {
  * latest, so nothing reads as having appeared out of nowhere.
  */
 export function WhatsNewDialog({ open, entries, onClose }: WhatsNewDialogProps) {
+  const t = useT();
   if (entries.length === 0) return null;
 
   return (
@@ -35,12 +37,12 @@ export function WhatsNewDialog({ open, entries, onClose }: WhatsNewDialogProps) 
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Sparkles className="size-4 text-primary" />
-            <DialogTitle>What's new</DialogTitle>
+            <DialogTitle>{t("whatsNewDialog.title")}</DialogTitle>
           </div>
           <DialogDescription>
             {entries.length === 1
-              ? `Since you last opened Leaf — v${entries[0].version}.`
-              : "Since you last opened Leaf."}
+              ? t("whatsNewDialog.sinceLastOpenedVersion", { version: entries[0].version })
+              : t("whatsNewDialog.sinceLastOpened")}
           </DialogDescription>
         </DialogHeader>
 
@@ -66,7 +68,7 @@ export function WhatsNewDialog({ open, entries, onClose }: WhatsNewDialogProps) 
         </DialogBody>
 
         <DialogFooter>
-          <Button onClick={onClose}>Got it</Button>
+          <Button onClick={onClose}>{t("whatsNewDialog.gotIt")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

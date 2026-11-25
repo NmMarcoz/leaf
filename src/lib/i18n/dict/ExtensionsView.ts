@@ -3,6 +3,7 @@ import type { PartialDictionary } from "@/lib/i18n/types";
 const dict: PartialDictionary = {
   en: {
     "extensionsView.title": "Extensions",
+    "extensionsView.luaFilter": "Lua extension",
     "extensionsView.tabInstalled": "Installed",
     "extensionsView.tabAvailable": "Available",
     "extensionsView.tabUpdates": "Updates",
@@ -73,6 +74,7 @@ const dict: PartialDictionary = {
   },
   "pt-BR": {
     "extensionsView.title": "Extensões",
+    "extensionsView.luaFilter": "Extensão Lua",
     "extensionsView.tabInstalled": "Instaladas",
     "extensionsView.tabAvailable": "Disponíveis",
     "extensionsView.tabUpdates": "Atualizações",

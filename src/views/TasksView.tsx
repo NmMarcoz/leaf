@@ -261,7 +261,7 @@ function ExtensionsPanel({ onManage }: { onManage: () => void }) {
             <span className="shrink-0 text-text-secondary">
               {source.lang === "multi" || source.lang === "all"
                 ? t("tasks.manyLanguages")
-                : languageName(source.lang)}
+                : languageName(source.lang, t)}
             </span>
           </li>
         ))}
