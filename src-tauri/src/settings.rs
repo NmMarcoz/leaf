@@ -42,6 +42,21 @@ impl Default for DeliveryConfig {
     }
 }
 
+/// An extension repository the user added: a URL they typed, never one the
+/// app suggested. Nothing ships pre-filled here, and nothing may — see
+/// `leaf_extensions::repo`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionRepo {
+    /// The index URL, normalised (`…/index.json`).
+    pub url: String,
+    /// What the repository called itself when it was added.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Unix seconds.
+    #[serde(default)]
+    pub added_at: u64,
+}
+
 /// Everything the user can configure, as the frontend sees it.
 ///
 /// Paths are resolved here rather than in the UI, so `library_root` and
@@ -117,6 +132,10 @@ pub struct Settings {
     /// wherever the author left it.
     #[serde(default)]
     pub disabled_extensions: Vec<String>,
+    /// Extension repositories, in the order added. Empty by default and on
+    /// every fresh install.
+    #[serde(default)]
+    pub extension_repos: Vec<ExtensionRepo>,
 }
 
 /// The on-disk shape. Every field optional so an older file still loads.
@@ -136,6 +155,7 @@ struct Stored {
     approved_extensions: Option<Vec<String>>,
     dev_extensions: Option<Vec<String>>,
     disabled_extensions: Option<Vec<String>>,
+    extension_repos: Option<Vec<ExtensionRepo>>,
 }
 
 pub fn load(app: &AppHandle) -> Result<Settings> {
@@ -176,6 +196,7 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
         approved_extensions: stored.approved_extensions.unwrap_or_default(),
         dev_extensions: stored.dev_extensions.unwrap_or_default(),
         disabled_extensions: stored.disabled_extensions.unwrap_or_default(),
+        extension_repos: stored.extension_repos.unwrap_or_default(),
     })
 }
 
@@ -198,6 +219,7 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
             approved_extensions: Some(next.approved_extensions.clone()),
             dev_extensions: Some(next.dev_extensions.clone()),
             disabled_extensions: Some(next.disabled_extensions.clone()),
+            extension_repos: Some(next.extension_repos.clone()),
         },
     )
 }

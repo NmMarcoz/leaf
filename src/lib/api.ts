@@ -174,18 +174,30 @@ export const saveCover = (url: string) => invoke<string>("save_cover", { url });
 export const sourceLabel = (source: MetaSource) =>
   source === "mangadex" ? "MangaDex" : "Kitsu";
 
+/** What a source is, and so what it may do. Mirrors `leaf_extensions::Kind`. */
+export type SourceKind = "metadata" | "enrich" | "reader";
+
 /**
- * A registered `Source` beyond the MangaDex/Kitsu pair: built in, or a
+ * A registered source beyond the MangaDex/Kitsu pair: built in, or a
  * `.lua` extension under `<library>/extensions/`. Mirrors
  * `leaf_extensions::SourceInfo`.
  */
 export interface SourceInfo {
-  /** Stable and namespaced, e.g. `leaf.mangadex` or `user.example` —
+  /** Stable and namespaced, e.g. `leaf.mangadex` or `user.some-site` —
    * this is the exact string stored in a `Series`' `source` column. */
   id: string;
   name: string;
+  kind: SourceKind;
   lang: string;
   base_url: string;
+  /** Further origins the script may reach; widen what an approval covers. */
+  mirrors: string[];
+  description: string | null;
+  /** Host API level the script was written for. */
+  api: number;
+  nsfw: boolean;
+  /** What it answers: `search`, `chapters`, `pages`, `details`, `catalogue`, … */
+  capabilities: string[];
 }
 
 /** One row of a registered source's catalogue. Mirrors `MangaSummary`. */
@@ -222,15 +234,51 @@ export type ScriptState = "approved" | "dev" | "pending" | "disabled" | "broken"
 /** One `.lua` file in the extensions folder, as the panel lists it. Mirrors
  * `UserScript`. `info` is absent exactly when the script failed to load, in
  * which case `error` explains why the row renders anyway. */
-export interface UserScript {
+export interface UserScript extends Partial<SourceInfo> {
   file: string;
   fingerprint: string;
   state: ScriptState;
-  id?: string;
-  name?: string;
-  lang?: string;
-  base_url?: string;
   error: string;
+  /** What the loader accepted but will not act on. */
+  warnings: string[];
+}
+
+/** An extension repository the user added. Mirrors `settings::ExtensionRepo`. */
+export interface ExtensionRepo {
+  url: string;
+  name: string | null;
+  added_at: number;
+}
+
+/** An index entry against the local folder. Mirrors `repo::RepoStatus`. */
+export type RepoStatus = "not-installed" | "installed" | "update-available" | "incompatible";
+
+/** One script a repository offers. Mirrors `repo::RepoRow` (flattened `RepoScript`). */
+export interface RepoRow {
+  file: string;
+  id: string;
+  name: string;
+  kind: SourceKind;
+  lang: string;
+  base_url: string;
+  mirrors: string[];
+  description: string | null;
+  sha256: string;
+  version: string;
+  api: number;
+  nsfw: boolean;
+  capabilities: string[];
+  status: RepoStatus;
+  local_file: string | null;
+  local_state: ScriptState | null;
+}
+
+/** A repository's index, browsed. Mirrors `sources::RepoBrowse`. */
+export interface RepoBrowse {
+  url: string;
+  name: string | null;
+  rows: RepoRow[];
+  skipped: number;
 }
 
 /** Every registered source, for an Add-from-source or Explore picker. */
@@ -266,6 +314,25 @@ export const removeExtension = (file: string) =>
  * fingerprint that was locked — computed by the backend from the file. */
 export const lockExtension = (file: string) =>
   invoke<string>("lock_extension", { file });
+
+/** The extension repositories the user added. */
+export const listExtensionRepos = () => invoke<ExtensionRepo[]>("list_extension_repos");
+
+/** Add a repository by the address the user typed; its index is read first. */
+export const addExtensionRepo = (url: string) =>
+  invoke<ExtensionRepo>("add_extension_repo", { url });
+
+/** Forget a repository. Scripts installed from it stay. */
+export const removeExtensionRepo = (url: string) =>
+  invoke<void>("remove_extension_repo", { url });
+
+/** Fetch a repository's index and compare it with what is installed. */
+export const browseExtensionRepo = (url: string) =>
+  invoke<RepoBrowse>("browse_extension_repo", { url });
+
+/** Install or update one script from a repository. It lands pending. */
+export const installFromExtensionRepo = (url: string, id: string) =>
+  invoke<string>("install_from_extension_repo", { url, id });
 
 /** Search one registered source's own catalogue. */
 export const searchSource = (source: string, query: string, page: number) =>

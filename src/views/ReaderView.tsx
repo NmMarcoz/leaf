@@ -180,14 +180,8 @@ export function ReaderView({
       const found = await readerOnlineChapter(target.source, target.chapterId);
       if (cancelled) return;
 
-      // Not an error: the source indexes the chapter but the publisher hosts
-      // it. Nothing in the chapter list marks this reliably, so it can only be
-      // discovered by asking, and the honest response is to say where it lives.
       if (found.pages.length === 0) {
-        setFailure({
-          message: found.message ?? t("readerView.noPagesMessage"),
-          externalUrl: found.external_url,
-        });
+        setFailure({ message: t("readerView.noPagesMessage"), externalUrl: null });
         return;
       }
 
@@ -264,7 +258,14 @@ export function ReaderView({
     };
 
     run().catch((e) => {
-      if (!cancelled) setFailure({ message: String(e), externalUrl: null });
+      // A reader extension reports a chapter its site indexes but a publisher
+      // hosts as an error ending in the publisher's URL — the only channel a
+      // script has. Offering that URL as a button keeps "where it lives" one
+      // tap away whichever reader said it.
+      if (!cancelled) {
+        const message = String(e);
+        setFailure({ message, externalUrl: message.match(/https?:\/\/\S+$/)?.[0] ?? null });
+      }
     });
 
     return () => {
