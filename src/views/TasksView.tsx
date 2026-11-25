@@ -40,7 +40,7 @@ export function TasksView({ tasks, onOpenDevices, onOpenExtensions }: TasksViewP
 
   return (
     <div className="scrollbar-thin h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-[1048px] flex-col gap-6 px-5 pb-10 pt-6 sm:px-10 sm:pt-8">
+      <div className="mx-auto flex max-w-[1048px] flex-col gap-6 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
         <header className="flex flex-wrap items-end gap-x-6 gap-y-2">
           <div className="min-w-0 flex-1">
             <h1 className="type-display max-sm:text-[32px] max-sm:leading-9">{t("tasks.title")}</h1>

@@ -95,10 +95,10 @@ export function SettingsView({
 
   return (
     <div className="flex h-full min-h-0 max-md:flex-col">
-      <aside className="flex shrink-0 flex-col gap-1 md:w-[232px] md:px-5 md:pt-8 max-md:border-b max-md:border-line max-md:px-5 max-md:pt-5">
+      <aside className="flex shrink-0 flex-col gap-1 md:w-[232px] md:px-5 md:pt-8 max-md:border-b max-md:border-line max-md:px-5 max-md:pt-3">
         <h1 className="type-title px-2 pb-4 max-md:px-0 max-md:pb-3">{t("settingsView.title")}</h1>
         <nav
-          className="flex gap-1 md:flex-col max-md:scrollbar-thin max-md:-mx-5 max-md:overflow-x-auto max-md:px-5 max-md:pb-3"
+          className="flex gap-1 md:flex-col max-md:scrollbar-none max-md:-mx-5 max-md:overflow-x-auto max-md:px-5 max-md:pb-3"
           aria-label={t("settingsView.title")}
         >
           {pages.map((p) => (

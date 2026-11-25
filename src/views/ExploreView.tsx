@@ -313,7 +313,7 @@ function MangaDexExplore({
       onScroll={scroll.onScroll}
       className="scrollbar-thin h-full overflow-y-auto"
     >
-      <div className="mx-auto flex max-w-[1048px] flex-col gap-5 px-5 pb-10 pt-6 sm:px-10 sm:pt-8">
+      <div className="mx-auto flex max-w-[1048px] flex-col gap-5 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
         <ExploreHeader
           subtitle={
             total > 0
@@ -360,7 +360,7 @@ function MangaDexExplore({
             <div
               role="radiogroup"
               aria-label={t("exploreView.presets")}
-              className="scrollbar-thin -mx-5 flex gap-1.5 overflow-x-auto px-5 sm:mx-0 sm:flex-wrap sm:px-0"
+              className="scrollbar-none -mx-5 flex gap-1.5 overflow-x-auto px-5 sm:mx-0 sm:flex-wrap sm:px-0"
             >
               {presets.map((preset) => (
                 <Chip
@@ -448,7 +448,9 @@ function ExploreHeader({
   const t = useT();
   return (
     <header className="flex flex-wrap items-center gap-x-5 gap-y-3">
-      <div className="min-w-0 flex-1">
+      {/* A full row on a phone: beside the source card the title was
+          squeezed until the card drew over it. */}
+      <div className="min-w-0 flex-1 max-sm:basis-full">
         <h1 className="type-display max-sm:text-[32px] max-sm:leading-9">{t("exploreView.title")}</h1>
         <p className="mt-1 text-sm text-text-secondary">{subtitle}</p>
       </div>
@@ -661,7 +663,7 @@ function RegisteredSourceExplore({
       onScroll={scroll.onScroll}
       className="scrollbar-thin h-full overflow-y-auto"
     >
-      <div className="mx-auto flex max-w-[1048px] flex-col gap-5 px-5 pb-10 pt-6 sm:px-10 sm:pt-8">
+      <div className="mx-auto flex max-w-[1048px] flex-col gap-5 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
         <ExploreHeader
           subtitle={current?.description || t("exploreView.subtitleSource", { source: current?.name ?? sourceId })}
           picker={<SourcePicker value={sourceId} sources={sources} onChange={onSourceChange} />}
