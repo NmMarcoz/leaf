@@ -15,7 +15,7 @@ import { cancelTask, clearFinishedTasks, isActive, type Task } from "@/component
 import { listSources, languageName, type SourceInfo } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import { canSendToDevice } from "@/lib/platform";
-import { sendConfig } from "@/lib/send";
+import { defaultDevice, deviceSummary, getSettings, type Device } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
 interface TasksViewProps {
@@ -216,24 +216,24 @@ function Row({ task, children }: { task: Task; children?: React.ReactNode }) {
 
 function DevicePanel({ onManage }: { onManage: () => void }) {
   const t = useT();
-  const [email, setEmail] = useState<string | null>(null);
+  const [device, setDevice] = useState<Device | null | undefined>(undefined);
   useEffect(() => {
-    sendConfig()
-      .then((status) => setEmail(status.config.kindle_email.trim()))
-      .catch(() => setEmail(""));
+    getSettings()
+      .then((s) => setDevice(defaultDevice(s)))
+      .catch(() => setDevice(null));
   }, []);
-  if (email === null) return null;
+  if (device === undefined) return null;
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-line bg-raised p-4">
       <p className="type-overline">{t("tasks.defaultDevice")}</p>
-      <p className="type-subtitle">{email ? "Kindle" : t("tasks.noDevice")}</p>
+      <p className="type-subtitle truncate">{device ? device.name : t("tasks.noDevice")}</p>
       <p className="truncate text-xs text-text-secondary">
-        {email ? t("tasks.deviceDetail", { email }) : t("tasks.noDeviceDetail")}
+        {device ? deviceSummary(t, device) : t("tasks.noDeviceDetail")}
       </p>
       <div className="mt-1">
         <Button variant="outline" size="sm" onClick={onManage}>
-          {email ? t("tasks.manage") : t("tasks.setUp")}
+          {device ? t("tasks.manage") : t("tasks.setUp")}
         </Button>
       </div>
     </div>

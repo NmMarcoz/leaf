@@ -7,12 +7,20 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+#[cfg(desktop)]
+use anyhow::Context;
+#[cfg(desktop)]
 use leaf_send::{Account, Delivery, Security};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+#[cfg(desktop)]
+use tauri::Emitter;
 
-use crate::settings::{self, DeliveryConfig};
+use crate::devices;
+#[cfg(desktop)]
+use crate::settings::DeliveryConfig;
+use crate::settings;
 use crate::util::blocking;
 
 /// Keychain coordinates. The service matches the bundle identifier so the entry
@@ -130,24 +138,46 @@ pub async fn save_send_config(
     .await
 }
 
-/// Prove the mail account works, without sending a document.
+/// Prove a device is reachable, without sending a document.
+///
+/// For an email device that is a test message to its address through the
+/// mail account; for a folder device, that the folder (or the plugged-in
+/// reader) is there to write to.
 #[tauri::command]
-pub async fn send_test_email(app: AppHandle) -> Result<(), String> {
+pub async fn send_test_email(app: AppHandle, device: Option<String>) -> Result<(), String> {
     blocking(move || {
+        let settings = settings::load(&app)?;
+        let Some(device) = settings::device(&settings, device.as_deref()).cloned() else {
+            bail!("add a device first");
+        };
+        if device.delivery == "folder" {
+            devices::destination(&device, &devices::connected())?;
+            return Ok(());
+        }
+
         #[cfg(not(desktop))]
         bail!("{UNAVAILABLE}");
 
         #[cfg(desktop)]
         {
-        let config = settings::load(&app)?.delivery;
-        let to = config.kindle_email.trim().to_string();
-        if to.is_empty() {
-            bail!("no device address set");
-        }
-        leaf_send::send_test(&account(&config)?, &stored_password().unwrap_or_default(), &to)
+            let to = device.address.trim().to_string();
+            if to.is_empty() {
+                bail!("{} has no email address", device.name);
+            }
+            leaf_send::send_test(
+                &account(&settings.delivery)?,
+                &stored_password().unwrap_or_default(),
+                &to,
+            )
         }
     })
     .await
+}
+
+/// Readers plugged in right now, for the device form's "found" line.
+#[tauri::command]
+pub async fn connected_readers() -> Result<Vec<devices::Connected>, String> {
+    blocking(|| Ok(devices::connected())).await
 }
 
 /// Send already-built files.
@@ -159,34 +189,54 @@ pub async fn send_test_email(app: AppHandle) -> Result<(), String> {
 /// One message per file. Batching them into a single mail would blow through
 /// the attachment limit on the second volume.
 #[tauri::command]
-pub async fn send_files(app: AppHandle, paths: Vec<String>) -> Result<SendReport, String> {
-    blocking(move || deliver_all(&app, &paths)).await
+pub async fn send_files(
+    app: AppHandle,
+    paths: Vec<String>,
+    device: Option<String>,
+) -> Result<SendReport, String> {
+    blocking(move || deliver_all(&app, device.as_deref(), &paths)).await
 }
 
-/// Mail a set of built volumes to the configured device.
+/// Send built volumes to a device (`None` = the default one).
 ///
 /// Split out of the command because a queued build finishes by doing exactly
 /// this, and "build then send" should be one job rather than something the user
 /// has to come back and finish by hand.
-pub fn deliver_all(app: &AppHandle, paths: &[String]) -> anyhow::Result<SendReport> {
+pub fn deliver_all(app: &AppHandle, device: Option<&str>, paths: &[String]) -> anyhow::Result<SendReport> {
+    if paths.is_empty() {
+        bail!("nothing to send");
+    }
+    let settings = settings::load(app)?;
+    let Some(device) = settings::device(&settings, device).cloned() else {
+        bail!("no device to send to — add one under Settings → Devices");
+    };
+
+    if device.delivery == "folder" {
+        let dir = devices::destination(&device, &devices::connected())?;
+        let files: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        let (sent, failed) = devices::copy_into(&dir, &files);
+        return Ok(SendReport {
+            sent,
+            failed: failed
+                .into_iter()
+                .map(|(file, error)| SendFailure { file, error })
+                .collect(),
+        });
+    }
+
     #[cfg(not(desktop))]
     {
-        let _ = (app, paths);
+        let _ = app;
         bail!("{UNAVAILABLE}");
     }
 
     #[cfg(desktop)]
     {
-        if paths.is_empty() {
-            bail!("nothing to send");
-        }
-
-        let config = settings::load(app)?.delivery;
-        let to = config.kindle_email.trim().to_string();
+        let to = device.address.trim().to_string();
         if to.is_empty() {
-            bail!("no device address set — add one under Send");
+            bail!("{} has no email address — add one under Settings → Devices", device.name);
         }
-        let account = account(&config)?;
+        let account = account(&settings.delivery)?;
         let secret = stored_password().unwrap_or_default();
 
         let total = paths.len();
@@ -217,6 +267,7 @@ pub fn deliver_all(app: &AppHandle, paths: &[String]) -> anyhow::Result<SendRepo
     }
 }
 
+#[cfg(desktop)]
 fn deliver(
     account: &Account,
     password: &str,
@@ -228,9 +279,10 @@ fn deliver(
     leaf_send::send(account, password, &Delivery { to, filename: name, bytes })
 }
 
+#[cfg(desktop)]
 fn account(config: &DeliveryConfig) -> Result<Account> {
     if config.host.trim().is_empty() {
-        bail!("no mail server set — add one under Send");
+        bail!("no mail server set — add the sending account under Settings → Devices");
     }
     Ok(Account {
         host: config.host.trim().to_string(),

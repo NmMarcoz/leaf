@@ -19,6 +19,7 @@
 //! list and gives the frontend something clearer than a missing-command error.
 //! - [`reader`] — reading a downloaded chapter; library only, works offline
 
+mod devices;
 mod export;
 mod fetch;
 mod harvest;
@@ -131,6 +132,7 @@ pub fn run() {
             send::save_send_config,
             send::send_test_email,
             send::send_files,
+            send::connected_readers,
             harvest::harvest_images,
             reader::reader_chapter,
             reader::reader_page,

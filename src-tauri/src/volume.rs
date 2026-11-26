@@ -89,11 +89,14 @@ pub async fn build(
     volume: Volume,
     out: String,
     format: Format,
+    // Which device's page size and greyscale to write for; `None` is the
+    // default device. Spreads were already decided when the volume was opened.
+    device: Option<String>,
 ) -> Result<BuildReport, String> {
     let out = PathBuf::from(out);
     let pages = volume.total_included();
     let options = settings::load(&app)
-        .map(|s| settings::write_options(&s))
+        .map(|s| settings::write_options(&s, device.as_deref()))
         .unwrap_or(leaf_core::WriteOptions {
             compression: Default::default(),
             cover_badge: true,

@@ -8,7 +8,6 @@ import { LogoMark } from "@/components/Logo";
 import { Pane, PathWell, SettingsRow, SettingsSection } from "@/components/SettingsRow";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -19,7 +18,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { UpdateStage } from "@/hooks/useUpdater";
 import { LANGUAGES, useT } from "@/lib/i18n";
-import { canPickFolders, canRevealFiles, canSendToDevice, isAndroid } from "@/lib/platform";
+import { canPickFolders, canRevealFiles, isAndroid } from "@/lib/platform";
 import {
   defaultPrefs,
   loadPrefs,
@@ -29,19 +28,14 @@ import {
   type ReaderPrefs,
 } from "@/lib/reader";
 import {
-  compressionPresets,
-  CUSTOM_EDGE_MAX,
-  CUSTOM_EDGE_MIN,
-  CUSTOM_QUALITY_MIN,
   getSettings,
   setSettings,
-  type Compression,
   type Settings,
 } from "@/lib/settings";
 import type { ThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { ExtensionsView } from "@/views/ExtensionsView";
-import { SendView } from "@/views/SendView";
+import { DevicesView } from "@/views/DevicesView";
 
 export type SettingsPage = "general" | "devices" | "reading" | "extensions" | "about";
 
@@ -84,9 +78,9 @@ export function SettingsView({
   const t = useT();
   const pages: { value: SettingsPage; label: string }[] = [
     { value: "general", label: t("settingsView.pageGeneral") },
-    ...(canSendToDevice
-      ? [{ value: "devices" as const, label: t("settingsView.pageDevices") }]
-      : []),
+    // On every platform: a device is also the build profile, and a phone
+    // builds too. Sending is what is limited there, inside the page.
+    { value: "devices", label: t("settingsView.pageDevices") },
     { value: "reading", label: t("settingsView.pageReading") },
     { value: "extensions", label: t("settingsView.pageExtensions") },
     { value: "about", label: t("settingsView.pageAbout") },
@@ -121,7 +115,7 @@ export function SettingsView({
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {current.value === "devices" ? (
-          <SendView onSaved={() => {}} onError={onError} />
+          <DevicesView onSaved={onSaved} onError={onError} />
         ) : current.value === "extensions" ? (
           <ExtensionsView onError={onError} />
         ) : current.value === "reading" ? (
@@ -239,8 +233,6 @@ function GeneralPage({
     { value: "light", label: t("settingsView.themeLight") },
     { value: "dark", label: t("settingsView.themeDark") },
   ];
-  const presets = compressionPresets(t);
-  const preset = settings && presets.find((p) => p.value === settings.compression);
 
   return (
     <Pane title={title} status={status}>
@@ -358,58 +350,6 @@ function GeneralPage({
           </SettingsSection>
 
           <SettingsSection title={t("settingsView.generated")}>
-            <SettingsRow title={t("settingsView.format")} description={t("settingsView.formatDetail")}>
-              <Select
-                value={settings.default_format}
-                onValueChange={(v) => patch({ default_format: v })}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="epub">{t("settingsView.formatEpub")}</SelectItem>
-                  <SelectItem value="cbz">{t("settingsView.formatCbz")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </SettingsRow>
-            <SettingsRow title={t("settingsView.pageSize")} description={preset?.detail}>
-              <Select
-                value={settings.compression}
-                onValueChange={(v) => patch({ compression: v })}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {presets.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingsRow>
-            {settings.compression === "custom" && (
-              <CustomCompression
-                value={settings.custom_compression}
-                onChange={(custom_compression) => patch({ custom_compression })}
-              />
-            )}
-            <SettingsRow
-              htmlFor="split-spreads"
-              title={t("settingsView.splitSpreads")}
-              description={
-                settings.split_spreads
-                  ? t("settingsView.splitSpreadsOn")
-                  : t("settingsView.splitSpreadsOff")
-              }
-            >
-              <Switch
-                id="split-spreads"
-                checked={settings.split_spreads}
-                onCheckedChange={(on) => patch({ split_spreads: on })}
-              />
-            </SettingsRow>
             <SettingsRow
               htmlFor="cover-badge"
               title={t("settingsView.coverBadge")}
@@ -474,99 +414,6 @@ function UpdatesRow({
         {t("settingsView.checkNow")}
       </Button>
     </SettingsRow>
-  );
-}
-
-/**
- * The three numbers behind the "Custom" page size.
- *
- * Fields hold their own text while being typed in, so clearing one to retype it
- * does not snap it straight back; the value is clamped when the field is left,
- * to the same bounds the backend enforces, so what is shown is what is used.
- */
-function CustomCompression({
-  value,
-  onChange,
-}: {
-  value: Compression;
-  onChange: (next: Compression) => void;
-}) {
-  const t = useT();
-  const [edge, setEdge] = useState(value.max_edge?.toString() ?? "");
-  const [quality, setQuality] = useState(value.quality.toString());
-
-  // Pick up values the backend clamped on save.
-  useEffect(() => setEdge(value.max_edge?.toString() ?? ""), [value.max_edge]);
-  useEffect(() => setQuality(value.quality.toString()), [value.quality]);
-
-  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-
-  const commitEdge = () => {
-    const n = Number.parseInt(edge, 10);
-    // Empty means "no limit": pages keep their size and are only re-encoded.
-    const max_edge =
-      edge.trim() === "" || Number.isNaN(n) ? null : clamp(n, CUSTOM_EDGE_MIN, CUSTOM_EDGE_MAX);
-    setEdge(max_edge?.toString() ?? "");
-    onChange({ ...value, max_edge });
-  };
-
-  const commitQuality = () => {
-    const n = Number.parseInt(quality, 10);
-    const q = Number.isNaN(n) ? value.quality : clamp(n, CUSTOM_QUALITY_MIN, 100);
-    setQuality(q.toString());
-    onChange({ ...value, quality: q });
-  };
-
-  return (
-    <>
-      <SettingsRow
-        title={t("settingsView.customEdge")}
-        description={t("settingsView.customHint", {
-          min: CUSTOM_EDGE_MIN,
-          max: CUSTOM_EDGE_MAX,
-          qmin: CUSTOM_QUALITY_MIN,
-        })}
-      >
-        <Input
-          type="number"
-          inputMode="numeric"
-          min={CUSTOM_EDGE_MIN}
-          max={CUSTOM_EDGE_MAX}
-          step={100}
-          placeholder={t("settingsView.customNoLimit")}
-          value={edge}
-          onChange={(e) => setEdge(e.target.value)}
-          onBlur={commitEdge}
-          className="w-28"
-          aria-label={t("settingsView.customEdge")}
-        />
-        <span className="font-mono text-xs text-text-secondary">px</span>
-      </SettingsRow>
-      <SettingsRow title={t("settingsView.customQuality")}>
-        <Input
-          type="number"
-          inputMode="numeric"
-          min={CUSTOM_QUALITY_MIN}
-          max={100}
-          value={quality}
-          onChange={(e) => setQuality(e.target.value)}
-          onBlur={commitQuality}
-          className="w-24"
-          aria-label={t("settingsView.customQuality")}
-        />
-      </SettingsRow>
-      <SettingsRow
-        htmlFor="custom-grayscale"
-        title={t("settingsView.grayscale")}
-        description={t("settingsView.grayscaleDetail")}
-      >
-        <Switch
-          id="custom-grayscale"
-          checked={value.grayscale}
-          onCheckedChange={(grayscale) => onChange({ ...value, grayscale })}
-        />
-      </SettingsRow>
-    </>
   );
 }
 
