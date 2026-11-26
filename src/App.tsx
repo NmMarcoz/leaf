@@ -262,7 +262,15 @@ export default function App() {
 
     // Asked once, before anything needs somewhere to go.
     if (!settings.welcomed) {
-      return <WelcomeView onDone={setSettings} onError={setError} />;
+      return (
+        <WelcomeView
+          onDone={(next, land) => {
+            setSettings(next);
+            setView({ kind: land });
+          }}
+          onError={setError}
+        />
+      );
     }
 
     // The reader takes the whole window: a rail beside a page is a rail in
@@ -478,7 +486,7 @@ export default function App() {
         {/* Not over a chapter: it sat on the reader's page scrubber, and an
             update can wait until the reader is closed. */}
         <UpdateBanner
-          state={view.kind === "reader" ? { stage: "idle" } : updater.state}
+          state={view.kind === "reader" || !settings?.welcomed ? { stage: "idle" } : updater.state}
           dismissed={updater.dismissed}
           onInstall={updater.install}
           onRestart={updater.restart}
