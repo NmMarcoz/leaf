@@ -4,7 +4,13 @@ import type * as React from "react";
 import { useT } from "@/lib/i18n";
 import { languageName } from "@/lib/api";
 import { isMobile } from "@/lib/platform";
-import { readerFits, readerModes, type ReaderPrefs } from "@/lib/reader";
+import {
+  readerFits,
+  readerModes,
+  STRIP_DEFAULT,
+  STRIP_MIN,
+  type ReaderPrefs,
+} from "@/lib/reader";
 import { cn } from "@/lib/utils";
 
 interface ReaderSettingsProps {
@@ -45,6 +51,8 @@ export function ReaderSettings({
 }: ReaderSettingsProps) {
   const t = useT();
   const autoArrow = seriesDirection === "right-to-left" ? "←" : "→";
+  // The strip can be no wider than the window it is drawn in.
+  const roomForStrip = window.innerWidth;
 
   return (
     <aside
@@ -124,26 +132,64 @@ export function ReaderSettings({
           </div>
         </Section>
 
-        <Section title={t("readerSettings.fit")}>
-          <Pills
-            value={prefs.fit}
-            onChange={(fit) => onChange({ fit })}
-            options={readerFits(t).map((f) => [f.value, f.label])}
-          />
-        </Section>
+        {/* A strip has one sensible fit, its width; how wide is the choice. */}
+        {prefs.mode === "webtoon" ? (
+          <Section title={t("readerSettings.stripWidth")}>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={STRIP_MIN}
+                max={Math.max(STRIP_MIN, roomForStrip)}
+                step={8}
+                value={Math.min(prefs.stripWidth ?? STRIP_DEFAULT, Math.max(STRIP_MIN, roomForStrip))}
+                onChange={(e) => onChange({ stripWidth: Number(e.target.value) })}
+                aria-label={t("readerSettings.stripWidth")}
+                className="h-1.5 min-w-0 flex-1 cursor-pointer accent-deliver"
+              />
+              <span className="w-14 shrink-0 text-right font-mono text-xs text-on-ink-muted">
+                {Math.min(prefs.stripWidth ?? STRIP_DEFAULT, Math.max(STRIP_MIN, roomForStrip))}px
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-xs text-on-ink-muted">
+                {isMobile ? t("readerSettings.stripWidthHintTouch") : t("readerSettings.stripWidthHint")}
+              </p>
+              {prefs.stripWidth !== null && (
+                <button
+                  type="button"
+                  onClick={() => onChange({ stripWidth: null })}
+                  className="shrink-0 rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-on-ink hover:bg-ink/60"
+                >
+                  {t("readerSettings.stripWidthReset")}
+                </button>
+              )}
+            </div>
+          </Section>
+        ) : (
+          <Section title={t("readerSettings.fit")}>
+            <Pills
+              value={prefs.fit}
+              onChange={(fit) => onChange({ fit })}
+              options={readerFits(t).map((f) => [f.value, f.label])}
+            />
+          </Section>
+        )}
 
-        <Section title={t("readerSettings.direction")}>
-          <Pills
-            value={prefs.direction ?? "auto"}
-            onChange={(d) => onChange({ direction: d === "auto" ? null : d })}
-            options={[
-              ["auto", t("readerSettings.directionAuto", { arrow: autoArrow })],
-              ["right-to-left", t("readerSettings.directionOptionRightToLeft")],
-              ["left-to-right", t("readerSettings.directionOptionLeftToRight")],
-            ]}
-          />
-          <p className="text-xs text-on-ink-muted">{t("readerSettings.directionHint")}</p>
-        </Section>
+        {/* A strip reads top to bottom; left and right do not apply. */}
+        {prefs.mode !== "webtoon" && (
+          <Section title={t("readerSettings.direction")}>
+            <Pills
+              value={prefs.direction ?? "auto"}
+              onChange={(d) => onChange({ direction: d === "auto" ? null : d })}
+              options={[
+                ["auto", t("readerSettings.directionAuto", { arrow: autoArrow })],
+                ["right-to-left", t("readerSettings.directionOptionRightToLeft")],
+                ["left-to-right", t("readerSettings.directionOptionLeftToRight")],
+              ]}
+            />
+            <p className="text-xs text-on-ink-muted">{t("readerSettings.directionHint")}</p>
+          </Section>
+        )}
 
         <Section title={t("readerSettings.background")}>
           <Pills
