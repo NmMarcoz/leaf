@@ -728,6 +728,7 @@ function RegisteredSourceExplore({
       {selected && (
         <SourceSeriesModal
           source={sourceId}
+          sourceName={sources.find((s) => s.id === sourceId)?.name ?? sourceId}
           manga={selected}
           owned={ownedFor(selected)}
           onClose={() => setSelected(null)}

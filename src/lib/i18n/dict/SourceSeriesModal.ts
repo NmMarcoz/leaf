@@ -2,6 +2,16 @@ import type { PartialDictionary } from "@/lib/i18n/types";
 
 const dict: PartialDictionary = {
   en: {
+    "sourceSeriesModal.close": "Close",
+    "sourceSeriesModal.overline": "Series · {source}",
+    "sourceSeriesModal.statVolumes": "volumes",
+    "sourceSeriesModal.statChapters": "chapters",
+    "sourceSeriesModal.statReadable": "readable here",
+    "sourceSeriesModal.chapters": "Chapters",
+    "sourceSeriesModal.openOnShelf": "Open on your shelf",
+    "sourceSeriesModal.readChapter": "Read chapter {number}",
+    "sourceSeriesModal.nothingToRead": "Nothing to read here",
+    "sourceSeriesModal.addHint": "Adding downloads nothing yet: you choose the volumes afterwards.",
     "sourceSeriesModal.unknownAuthor": "Unknown author",
     "sourceSeriesModal.chaptersCount": "{count} chapters.",
     "sourceSeriesModal.inLibrary": "On your shelf",
@@ -17,6 +27,16 @@ const dict: PartialDictionary = {
     "sourceSeriesModal.chapterTitle": "Chapter {number}",
   },
   "pt-BR": {
+    "sourceSeriesModal.close": "Fechar",
+    "sourceSeriesModal.overline": "Série · {source}",
+    "sourceSeriesModal.statVolumes": "volumes",
+    "sourceSeriesModal.statChapters": "capítulos",
+    "sourceSeriesModal.statReadable": "para ler aqui",
+    "sourceSeriesModal.chapters": "Capítulos",
+    "sourceSeriesModal.openOnShelf": "Abrir na estante",
+    "sourceSeriesModal.readChapter": "Ler o capítulo {number}",
+    "sourceSeriesModal.nothingToRead": "Nada para ler aqui",
+    "sourceSeriesModal.addHint": "Adicionar não baixa nada ainda: você escolhe os volumes depois.",
     "sourceSeriesModal.unknownAuthor": "Autor desconhecido",
     "sourceSeriesModal.chaptersCount": "{count} capítulos.",
     "sourceSeriesModal.inLibrary": "Já está na sua estante",
