@@ -5,14 +5,16 @@ const dict: PartialDictionary = {
     "app.dropToOpen": "Drop to open this folder",
     "app.tasks": "Tasks",
     "app.tasksRunning": "{count} running",
-    "app.opening": "Opening your library…",
+    "app.opening": "Opening your shelf…",
+    "app.tagline": "read here, export to any e-reader",
     "app.noImages": "No images found in that folder.",
   },
   "pt-BR": {
     "app.dropToOpen": "Solte para abrir esta pasta",
     "app.tasks": "Tarefas",
     "app.tasksRunning": "{count} em andamento",
-    "app.opening": "Abrindo sua biblioteca…",
+    "app.opening": "Abrindo sua estante…",
+    "app.tagline": "leia aqui, exporte para qualquer e-reader",
     "app.noImages": "Nenhuma imagem encontrada nessa pasta.",
   },
 };
