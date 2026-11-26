@@ -18,9 +18,7 @@ use tauri::AppHandle;
 use tauri::Emitter;
 
 use crate::devices;
-#[cfg(desktop)]
-use crate::settings::DeliveryConfig;
-use crate::settings;
+use crate::settings::{self, DeliveryConfig};
 use crate::util::blocking;
 
 /// Keychain coordinates. The service matches the bundle identifier so the entry
