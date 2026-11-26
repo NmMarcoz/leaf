@@ -460,8 +460,10 @@ export default function App() {
           {body()}
         </div>
 
+        {/* Not over a chapter: it sat on the reader's page scrubber, and an
+            update can wait until the reader is closed. */}
         <UpdateBanner
-          state={updater.state}
+          state={view.kind === "reader" ? { stage: "idle" } : updater.state}
           dismissed={updater.dismissed}
           onInstall={updater.install}
           onRestart={updater.restart}
