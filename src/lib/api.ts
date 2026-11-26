@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
+import type { Translator } from "@/lib/i18n/types";
 import { canRevealFiles } from "@/lib/platform";
 
 /**
@@ -146,23 +147,24 @@ export const similarSeries = (source: MetaSource, tags: string[], exclude: strin
   invoke<SeriesMatch[]>("similar_series", { source, tags, exclude });
 
 /**
- * Language codes as they should read on screen.
+ * Language codes as they should read on screen, in the UI's own language.
  *
  * MangaDex uses a mix of plain and regioned codes, and `Intl.DisplayNames`
- * handles both; the map only covers the few it renders unhelpfully.
+ * handles both; the dictionary only covers the few it renders unhelpfully.
+ * `t` supplies both those and the locale `Intl` names the rest in.
  */
-export const languageName = (code: string): string => {
+export const languageName = (code: string, t: Translator): string => {
   const special: Record<string, string> = {
-    "pt-br": "Portuguese (Brazil)",
-    "es-la": "Spanish (Latin America)",
-    "zh-hk": "Chinese (Hong Kong)",
-    "ja-ro": "Japanese (romanised)",
-    "ko-ro": "Korean (romanised)",
-    "zh-ro": "Chinese (romanised)",
+    "pt-br": "api.languagePtBr",
+    "es-la": "api.languageEsLa",
+    "zh-hk": "api.languageZhHk",
+    "ja-ro": "api.languageJaRo",
+    "ko-ro": "api.languageKoRo",
+    "zh-ro": "api.languageZhRo",
   };
-  if (special[code]) return special[code];
+  if (special[code]) return t(special[code]);
   try {
-    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code;
+    return new Intl.DisplayNames([t("api.displayLocale")], { type: "language" }).of(code) ?? code;
   } catch {
     return code;
   }
@@ -356,8 +358,13 @@ export const volumesSource = (source: string, externalId: string) =>
 
 export const scanFolder = (path: string) => invoke<Volume>("scan", { path });
 
-export const buildVolume = (volume: Volume, out: string, format: Format) =>
-  invoke<BuildReport>("build", { volume, out, format });
+/** `device` picks whose page size and greyscale to write for; `null` = default. */
+export const buildVolume = (
+  volume: Volume,
+  out: string,
+  format: Format,
+  device: string | null = null,
+) => invoke<BuildReport>("build", { volume, out, format, device });
 
 export const suggestFilename = (volume: Volume, format: Format) =>
   invoke<string>("suggest_filename", { volume, format });
@@ -388,16 +395,16 @@ export const effectiveCover = (volume: Volume): string | null => {
   return null;
 };
 
-export const excludeLabel = (reason: ExcludeReason): string => {
+export const excludeLabel = (reason: ExcludeReason, t: Translator): string => {
   switch (reason.reason) {
     case "off-size":
-      return `Off-size ${reason.width}×${reason.height}`;
+      return t("api.excludeOffSize", { width: reason.width, height: reason.height });
     case "unreadable":
-      return "Unreadable";
+      return t("api.excludeUnreadable");
     case "not-a-page":
-      return "Not a page";
+      return t("api.excludeNotAPage");
     case "manual":
-      return "Excluded";
+      return t("api.excludeManual");
   }
 };
 
@@ -447,4 +454,5 @@ export async function deliverBuilt(path: string, title?: string): Promise<void> 
 }
 
 /** What the control doing the above should be called. */
-export const DELIVER_LABEL = canRevealFiles ? "Show" : "Share";
+export const deliverLabel = (t: Translator) =>
+  canRevealFiles ? t("api.deliverShow") : t("api.deliverShare");

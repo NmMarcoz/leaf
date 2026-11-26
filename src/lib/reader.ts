@@ -95,6 +95,33 @@ export interface OnlineChapter {
   pages: string[];
 }
 
+/**
+ * Where reopening a history entry goes.
+ *
+ * How it was read decides: a downloaded chapter comes off disk, a streamed one
+ * goes back to the source in the translation it was read in. The chapter list
+ * is left for the reader to fetch — it needs it anyway, and history is the one
+ * entry point that has never had it.
+ */
+export function historyTarget(entry: HistoryEntry): ReaderTarget {
+  if (entry.downloaded || !entry.chapter_source_id || !entry.series_source_id) {
+    return { kind: "library", seriesId: entry.series_id, chapter: entry.chapter };
+  }
+  return {
+    kind: "online",
+    source: entry.source ?? "mangadex",
+    chapterId: entry.chapter_source_id,
+    seriesTitle: entry.series_title,
+    chapterNumber: entry.chapter,
+    direction: "right-to-left",
+    language: entry.language,
+    chapters: [],
+    seriesSourceId: entry.series_source_id,
+    coverUrl: null,
+    librarySeriesId: entry.series_id,
+  };
+}
+
 export const readerOnlineChapter = (source: string, chapterId: string) =>
   invoke<OnlineChapter>("reader_online_chapter", { source, chapterId });
 

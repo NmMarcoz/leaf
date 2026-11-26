@@ -140,10 +140,41 @@ pub fn index_url(input: &str) -> Result<String> {
         rest[..host_end].to_ascii_lowercase(),
         &rest[host_end..]
     );
+    let input = forge_raw(&input).unwrap_or(input);
     if input.ends_with(".json") {
         return Ok(input);
     }
     Ok(format!("{}/index.json", input.trim_end_matches('/')))
+}
+
+/// A code host's *web page* for a repository or a file, as the raw address.
+///
+/// The address people copy is the one in their browser's bar, and on GitHub
+/// that is an HTML page about the file (`/blob/`), not the file — which is
+/// then reported as an index that is "not valid JSON". A repository page, or
+/// a `/tree/` folder in one, means the `index.json` at its root or in that
+/// folder. Only rewrites what is unambiguous; anything else is left as typed.
+fn forge_raw(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("https://www.github.com/"))?;
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let parts: Vec<&str> = rest.trim_end_matches('/').split('/').collect();
+    match parts.as_slice() {
+        [owner, repo] => Some(format!(
+            "https://raw.githubusercontent.com/{owner}/{}/HEAD/index.json",
+            repo.trim_end_matches(".git")
+        )),
+        [owner, repo, "blob" | "tree" | "raw", reference, path @ ..] => {
+            let mut raw = format!("https://raw.githubusercontent.com/{owner}/{repo}/{reference}");
+            for part in path {
+                raw.push('/');
+                raw.push_str(part);
+            }
+            Some(raw)
+        }
+        _ => None,
+    }
 }
 
 /// Parse an index, dropping the entries this build cannot read.
@@ -156,6 +187,12 @@ pub fn parse_index(text: &str) -> Result<(RepoIndex, usize)> {
         #[serde(default)]
         generated: Option<String>,
         scripts: Vec<serde_json::Value>,
+    }
+    // The common mistake, named: a web page about the file rather than the file.
+    if text.trim_start().starts_with('<') {
+        bail!(
+            "that address returned a web page, not an index.json — use the link to the raw file"
+        );
     }
     let raw: Raw = serde_json::from_str(text).context("the repository index is not valid JSON")?;
     if raw.schema > INDEX_SCHEMA {
@@ -377,6 +414,32 @@ mod tests {
             index_url("Https://RAW.Repo.example/Owner/Main/").unwrap(),
             "https://raw.repo.example/Owner/Main/index.json"
         );
+    }
+
+    #[test]
+    fn a_code_host_page_address_means_the_raw_file() {
+        assert_eq!(
+            index_url("https://github.com/owner/repo/blob/main/index.json").unwrap(),
+            "https://raw.githubusercontent.com/owner/repo/main/index.json"
+        );
+        assert_eq!(
+            index_url("https://github.com/owner/repo").unwrap(),
+            "https://raw.githubusercontent.com/owner/repo/HEAD/index.json"
+        );
+        assert_eq!(
+            index_url("https://github.com/owner/repo/tree/dev/extensions/").unwrap(),
+            "https://raw.githubusercontent.com/owner/repo/dev/extensions/index.json"
+        );
+        assert_eq!(
+            index_url("https://github.com/owner/repo.git").unwrap(),
+            "https://raw.githubusercontent.com/owner/repo/HEAD/index.json"
+        );
+    }
+
+    #[test]
+    fn a_web_page_is_reported_as_one_rather_than_as_bad_json() {
+        let err = parse_index("<!DOCTYPE html><html>…").unwrap_err().to_string();
+        assert!(err.contains("web page"), "{err}");
     }
 
     #[test]

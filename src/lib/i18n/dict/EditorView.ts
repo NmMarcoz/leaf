@@ -5,11 +5,13 @@ const dict: PartialDictionary = {
     "editorView.chapters": "Chapters",
     "editorView.details": "Details",
     "editorView.sendFailed": "Could not send: {error}",
+    "editorView.imagesFilter": "Images",
   },
   "pt-BR": {
     "editorView.chapters": "Capítulos",
     "editorView.details": "Detalhes",
     "editorView.sendFailed": "Não foi possível enviar: {error}",
+    "editorView.imagesFilter": "Imagens",
   },
 };
 

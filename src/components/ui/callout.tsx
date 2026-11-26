@@ -12,10 +12,10 @@ import { cn } from "@/lib/utils";
 export type CalloutTone = "info" | "warning" | "success" | "destructive";
 
 const TONE: Record<CalloutTone, { box: string; icon: string; Icon: typeof Info }> = {
-  info: { box: "bg-muted", icon: "text-muted-foreground", Icon: Info },
-  warning: { box: "bg-amber-500/15", icon: "text-amber-500", Icon: AlertTriangle },
-  success: { box: "bg-primary/15", icon: "text-primary", Icon: CheckCircle2 },
-  destructive: { box: "bg-destructive/15", icon: "text-destructive", Icon: AlertTriangle },
+  info: { box: "bg-info-soft", icon: "text-info", Icon: Info },
+  warning: { box: "bg-warning-soft", icon: "text-warning", Icon: AlertTriangle },
+  success: { box: "bg-success-soft", icon: "text-success", Icon: CheckCircle2 },
+  destructive: { box: "bg-danger-soft", icon: "text-danger", Icon: AlertTriangle },
 };
 
 export function Callout({
@@ -31,11 +31,11 @@ export function Callout({
 }) {
   const { box, icon, Icon } = TONE[tone];
   return (
-    <div className={cn("flex gap-3 rounded-lg px-3.5 py-3", box, className)}>
+    <div className={cn("flex gap-3 rounded-xl px-4 py-3", box, className)}>
       <Icon className={cn("mt-px size-4 shrink-0", icon)} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
         {title && <p className="font-medium text-foreground">{title}</p>}
-        {children && <div className="leading-relaxed text-muted-foreground">{children}</div>}
+        {children && <div className="leading-4 text-text-secondary">{children}</div>}
       </div>
     </div>
   );

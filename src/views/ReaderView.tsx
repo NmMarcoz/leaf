@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 
 import { ReaderSettings } from "@/components/ReaderSettings";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useImageZoom } from "@/hooks/useImageZoom";
 import { useT } from "@/lib/i18n";
@@ -560,7 +559,7 @@ export function ReaderView({
           setFailure({
             message: t("readerView.noChapterInLanguage", {
               number: open.number,
-              language: languageName(code),
+              language: languageName(code, t),
             }),
             externalUrl: null,
           });
@@ -604,10 +603,12 @@ export function ReaderView({
     prefs.background === "white"
       ? "bg-white"
       : prefs.background === "grey"
-        ? "bg-neutral-800"
-        : "bg-black";
+        ? "bg-neutral-700"
+        : "bg-ink";
 
   const visible = useMemo(() => pagesAt(page), [pagesAt, page]);
+  // On the last page (or the last pair): what the "up next" card waits for.
+  const atEnd = total > 0 && Math.max(page, ...visible) >= total - 1;
 
   // The incoming view during a turn: the pages the overlay carries. The old
   // view stays underneath, committed and painted, until the end commits.
@@ -618,35 +619,51 @@ export function ReaderView({
   if (!open) {
     return (
       <div className={cn("relative flex h-full flex-col", surface)}>
-        <header className="flex items-center gap-3 bg-black/70 px-4 py-2.5 text-white">
-          <Button variant="ghost" size="icon" onClick={onExit} className="text-white">
-            <ArrowLeft />
-          </Button>
-          <p className="flex-1 truncate text-sm font-medium">
+        <div className={cn(PILL, "left-3 top-3 max-w-[calc(100%-1.5rem)] sm:left-6 sm:top-5")}>
+          <button
+            type="button"
+            onClick={onExit}
+            aria-label={t("readerView.goBack")}
+            className={PILL_ICON}
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <p className="truncate pl-0.5 pr-3 text-xs font-medium">
             {target.kind === "online" ? target.seriesTitle : t("readerView.openingChapter")}
           </p>
-        </header>
+        </div>
 
         <div className="flex min-h-0 flex-1 items-center justify-center p-8">
           {failure ? (
             <div className="max-w-md text-center">
               <TriangleAlert className="mx-auto size-7 text-amber-500" />
-              <h2 className="mt-3 text-sm font-medium text-white">
+              <h2 className="mt-3 text-sm font-medium text-on-ink">
                 {t("readerView.cannotReadTitle")}
               </h2>
               {/* The message ends in a publisher URL, which has no spaces in
                   it to wrap at and runs off both edges of a phone without this. */}
-              <p className="mt-1.5 break-words text-xs leading-relaxed text-white/60">
+              <p className="mt-1.5 break-words text-xs leading-relaxed text-on-ink-muted">
                 {failure.message}
               </p>
 
               <div className="mt-5 flex items-center justify-center gap-2">
-                <Button variant="outline" onClick={onExit}>
+                {/* Restyled for the ink surface: the default ink button
+                    disappears into it, and the outline one turns paper. The
+                    way onward is the paper one when there is somewhere to go. */}
+                <Button
+                  variant="ghost"
+                  onClick={onExit}
+                  className={cn(
+                    failure.externalUrl
+                      ? "bg-ink-raised text-on-ink hover:bg-ink-raised/80 hover:text-on-ink"
+                      : "bg-on-ink text-ink hover:bg-on-ink/90 hover:text-ink",
+                  )}
+                >
                   <ArrowLeft />
                   {t("readerView.goBack")}
                 </Button>
                 {failure.externalUrl && (
-                  <Button asChild>
+                  <Button asChild className="bg-on-ink text-ink hover:bg-on-ink/90">
                     <a
                       href={failure.externalUrl}
                       target="_blank"
@@ -659,7 +676,7 @@ export function ReaderView({
                 )}
               </div>
 
-              <p className="mt-4 text-[10px] text-white/35">
+              <p className="mt-4 text-[11px] text-on-ink-muted/70">
                 {isMobile ? t("readerView.backCloses") : t("readerView.escCloses")}
               </p>
             </div>
@@ -674,50 +691,69 @@ export function ReaderView({
   return (
     <div className={cn("relative flex h-full flex-col", surface)}>
       {showChrome && (
-        <header className="absolute inset-x-0 top-0 z-20 flex items-center gap-3 bg-black/70 px-4 py-2.5 text-white backdrop-blur-sm">
-          <Button variant="ghost" size="icon" onClick={onExit} className="text-white">
-            <ArrowLeft />
-          </Button>
-          {/* The title is the way to the series: from halfway through a
-              chapter, "what else is there" is a question worth one tap. */}
-          <button
-            className="min-w-0 flex-1 text-left"
-            onClick={() => open.progress && onOpenSeries(open.progress.seriesId)}
-            disabled={!open.progress}
+        <>
+          {/* Floating ink pills rather than full-width bars (Figma "13 ·
+              Leitor"): the page keeps the whole screen and the chrome only
+              covers what it labels. */}
+          <div className={cn(PILL, "left-3 top-3 max-w-[calc(100%-9.5rem)] sm:left-6 sm:top-5")}>
+            <button
+              type="button"
+              onClick={onExit}
+              aria-label={t("readerView.goBack")}
+              className={PILL_ICON}
+            >
+              <ArrowLeft className="size-4" />
+            </button>
+            {/* The title is the way to the series: from halfway through a
+                chapter, "what else is there" is a question worth one tap. */}
+            <button
+              type="button"
+              className="min-w-0 pl-0.5 pr-3 text-left text-xs leading-4"
+              onClick={() => open.progress && onOpenSeries(open.progress.seriesId)}
+              disabled={!open.progress}
+            >
+              <p className="truncate font-medium text-on-ink">{open.seriesTitle}</p>
+              <p className="flex items-center gap-1 truncate text-on-ink-muted">
+                {open.online && <Cloud className="size-3 shrink-0" aria-label={t("readerView.streaming")} />}
+                <span className="truncate">
+                  {t("readerView.chapterLabel", { number: open.number })}
+                  {open.title ? ` · ${open.title}` : ""}
+                </span>
+              </p>
+            </button>
+          </div>
+
+          <div
+            className={cn(
+              PILL,
+              "right-3 top-3 sm:top-5",
+              // Steps aside for the settings panel instead of hiding under it.
+              showSettings ? "sm:right-[376px]" : "sm:right-6",
+            )}
           >
-            <p className="truncate text-sm font-medium">{open.seriesTitle}</p>
-            <p className="truncate text-[11px] text-white/60">
-              {t("readerView.chapterLabel", { number: open.number })}
-              {open.title ? ` · ${open.title}` : ""}
-            </p>
-          </button>
-          {open.online && (
-            <Badge variant="outline" className="shrink-0 border-white/30 text-white/70">
-              <Cloud className="size-2.5" />
-              {t("readerView.streaming")}
-            </Badge>
-          )}
-          {/* A raw counter, not narrative text — left unwrapped like a clock. */}
-          <span className="shrink-0 font-mono text-xs text-white/70">
-            {page + 1} / {total}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-white"
-            onClick={() => {
-              setShowSettings((v) => !v);
-              const from = open.online_source;
-              if (from && !translations.length) {
-                void seriesTranslations(from.source, from.seriesSourceId)
-                  .then(setTranslations)
-                  .catch(() => {});
-              }
-            }}
-          >
-            <Settings2 />
-          </Button>
-        </header>
+            {/* A raw counter, not narrative text — left unwrapped like a clock. */}
+            <span className="pl-2.5 pr-1.5 font-mono text-xs text-on-ink-muted">
+              {page + 1} / {total}
+            </span>
+            <button
+              type="button"
+              aria-label={t("readerSettings.title")}
+              aria-pressed={showSettings}
+              className={cn(PILL_ICON, "bg-ink")}
+              onClick={() => {
+                setShowSettings((v) => !v);
+                const from = open.online_source;
+                if (from && !translations.length) {
+                  void seriesTranslations(from.source, from.seriesSourceId)
+                    .then(setTranslations)
+                    .catch(() => {});
+                }
+              }}
+            >
+              <Settings2 className="size-4" />
+            </button>
+          </div>
+        </>
       )}
 
       {prefs.mode === "webtoon" ? (
@@ -850,42 +886,87 @@ export function ReaderView({
       )}
 
       {showChrome && (
-        <footer className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-3 bg-black/70 px-4 py-2.5 backdrop-blur-sm">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-white"
+        <div
+          className={cn(
+            PILL,
+            "bottom-3 left-1/2 w-[600px] max-w-[calc(100%-1.5rem)] -translate-x-1/2 gap-3 px-2.5 sm:bottom-5",
+          )}
+        >
+          <button
+            type="button"
+            aria-label={t(rtl ? "readerView.nextPage" : "readerView.previousPage")}
+            className={cn(PILL_ICON, "p-1.5")}
             onClick={() => advance(rtl ? 1 : -1)}
           >
-            {rtl ? <ChevronRight /> : <ChevronLeft />}
-          </Button>
+            <ChevronLeft className="size-4" />
+          </button>
 
-          {/* Reversed for a right-to-left book, so dragging right goes back. */}
-          <input
-            type="range"
-            min={0}
-            max={Math.max(0, total - 1)}
-            value={page}
-            onChange={(e) => jump(Number(e.target.value))}
-            className={cn(
-              "h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 accent-primary",
-              rtl && "[direction:rtl]",
-            )}
-          />
+          {/* The bar is drawn, the range input on top of it does the work:
+              a native range cannot take the design's thin track and accent
+              fill in every engine. Reversed for a right-to-left book, so the
+              fill grows from the right and dragging right goes back. */}
+          <div className="relative flex h-6 min-w-0 flex-1 items-center">
+            <div
+              className={cn(
+                "flex h-1 w-full overflow-hidden rounded-full bg-ink",
+                rtl && "justify-end",
+              )}
+            >
+              <div
+                className="h-1 rounded-full bg-deliver"
+                style={{ width: `${total > 1 ? ((page + 1) / total) * 100 : 100}%` }}
+              />
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, total - 1)}
+              value={page}
+              aria-label={t("readerView.pageSlider")}
+              onChange={(e) => jump(Number(e.target.value))}
+              className={cn(
+                "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                rtl && "[direction:rtl]",
+              )}
+            />
+          </div>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-white"
+          <button
+            type="button"
+            aria-label={t(rtl ? "readerView.previousPage" : "readerView.nextPage")}
+            className={cn(PILL_ICON, "p-1.5")}
             onClick={() => advance(rtl ? -1 : 1)}
           >
-            {rtl ? <ChevronLeft /> : <ChevronRight />}
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Figma "13b · fim do capítulo": the last page offers the next chapter
+          instead of leaving the reader to find it. Turning on from here goes
+          there too, so the card is a signpost, not a gate. Kept up with the
+          chrome hidden — that is exactly when the reader would miss it. */}
+      {atEnd && open.next && !showSettings && (
+        <div className="absolute inset-x-3 bottom-[4.25rem] z-20 flex flex-col gap-2.5 rounded-2xl bg-raised p-4 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.4)] sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-60">
+          <p className="type-overline text-text-tertiary">{t("readerView.upNext")}</p>
+          <p className="type-subtitle">
+            {t("readerView.chapterLabel", { number: targetNumber(open.next) })}
+          </p>
+          {!isMobile && (
+            <p className="text-xs text-text-tertiary">
+              {t("readerView.continueHint", { arrow: rtl ? "←" : "→" })}
+            </p>
+          )}
+          <Button className="w-full" onClick={() => open.next && onNavigate(open.next)}>
+            <ChevronRight />
+            {t("readerView.continue")}
           </Button>
-        </footer>
+        </div>
       )}
 
       {showSettings && (
         <ReaderSettings
+          className="absolute inset-x-3 top-[4.25rem] z-30 w-auto sm:inset-x-auto sm:right-6 sm:top-5 sm:w-[340px]"
           prefs={prefs}
           seriesDirection={open.direction}
           translations={open.online_source ? translations : []}
@@ -898,6 +979,18 @@ export function ReaderView({
       )}
     </div>
   );
+}
+
+/** The floating ink pill every piece of reader chrome sits in (Figma "13 · Leitor"). */
+const PILL =
+  "absolute z-20 flex items-center gap-1.5 rounded-full bg-ink-raised/95 px-2 py-1.5 text-on-ink shadow-[0_8px_24px_rgba(0,0,0,0.35)]";
+const PILL_ICON =
+  "flex shrink-0 items-center justify-center rounded-full p-2 text-on-ink transition-colors hover:bg-ink";
+
+/** The chapter number a reader target opens, for the "up next" card. */
+function targetNumber(target: ReaderTarget): string {
+  if (target.kind === "library") return target.chapter;
+  return target.chapters.find((c) => c.id === target.chapterId)?.number ?? target.chapterNumber;
 }
 
 /** Tailwind for each fit mode, shared by both layouts. */

@@ -3,6 +3,24 @@ import type { PartialDictionary } from "@/lib/i18n/types";
 const dict: PartialDictionary = {
   en: {
     "extensionsView.title": "Extensions",
+    "extensionsView.luaFilter": "Lua extension",
+    "extensionsView.tabInstalled": "Installed",
+    "extensionsView.tabAvailable": "Available",
+    "extensionsView.tabUpdates": "Updates",
+    "extensionsView.search": "Search extensions",
+    "extensionsView.addFromFile": "From a file",
+    "extensionsView.refresh": "Check again",
+    "extensionsView.more": "More",
+    "extensionsView.replaceFromFile": "Replace from a file…",
+    "extensionsView.manyLanguages": "Many languages",
+    "extensionsView.reaches": "Will reach: {origins}",
+    "extensionsView.availableToInstall": "Available to install",
+    "extensionsView.noUpdates": "Everything installed is up to date.",
+    "extensionsView.noneAvailable": "Add a repository below to see what it offers.",
+    "extensionsView.fromRepo": "from {repo}",
+    "extensionsView.repos.count": "{count} extensions",
+    "extensionsView.repos.unreachable": "Unreachable",
+    "extensionsView.repos.addLabel": "Repository address",
     "extensionsView.explainer":
       "Each .lua file in your library's extensions folder is a source that runs with the app's network access. Approve one only after reading it or trusting its author; develop mode skips that check while you edit a file of your own — lock it when it is done.",
     "extensionsView.empty":
@@ -42,7 +60,7 @@ const dict: PartialDictionary = {
     "extensionsView.capability.catalogue": "browse in Explore",
     "extensionsView.repos.title": "Repositories",
     "extensionsView.repos.explainer":
-      "A repository is an address that lists extension files. Leaf comes with none; add one you trust. Installing only copies the file in — it still waits for your approval above, and an update asks again.",
+      "A repository is an address that lists extension files. Leaf comes with none; add one you trust. Installing only copies the file in — it still waits for your approval under Installed, and an update asks again.",
     "extensionsView.repos.add": "Add",
     "extensionsView.repos.install": "Install",
     "extensionsView.repos.update": "Update",
@@ -56,6 +74,24 @@ const dict: PartialDictionary = {
   },
   "pt-BR": {
     "extensionsView.title": "Extensões",
+    "extensionsView.luaFilter": "Extensão Lua",
+    "extensionsView.tabInstalled": "Instaladas",
+    "extensionsView.tabAvailable": "Disponíveis",
+    "extensionsView.tabUpdates": "Atualizações",
+    "extensionsView.search": "Buscar extensões",
+    "extensionsView.addFromFile": "De um arquivo",
+    "extensionsView.refresh": "Verificar de novo",
+    "extensionsView.more": "Mais",
+    "extensionsView.replaceFromFile": "Substituir por um arquivo…",
+    "extensionsView.manyLanguages": "Vários idiomas",
+    "extensionsView.reaches": "Vai acessar: {origins}",
+    "extensionsView.availableToInstall": "Disponíveis para instalar",
+    "extensionsView.noUpdates": "Tudo que está instalado está em dia.",
+    "extensionsView.noneAvailable": "Adicione um repositório abaixo para ver o que ele oferece.",
+    "extensionsView.fromRepo": "de {repo}",
+    "extensionsView.repos.count": "{count} extensões",
+    "extensionsView.repos.unreachable": "Inacessível",
+    "extensionsView.repos.addLabel": "Endereço do repositório",
     "extensionsView.explainer":
       "Cada arquivo .lua na pasta de extensões da sua biblioteca é uma fonte que roda com o acesso de rede do app. Aprove uma só depois de lê-la ou de confiar em quem a escreveu; o modo desenvolvimento pula essa verificação enquanto você edita um arquivo seu — trave-o quando terminar.",
     "extensionsView.empty":
@@ -95,7 +131,7 @@ const dict: PartialDictionary = {
     "extensionsView.capability.catalogue": "navegar no Explorar",
     "extensionsView.repos.title": "Repositórios",
     "extensionsView.repos.explainer":
-      "Um repositório é um endereço que lista arquivos de extensão. O Leaf não vem com nenhum; adicione um em que você confia. Instalar só copia o arquivo — ele ainda espera sua aprovação acima, e uma atualização pergunta de novo.",
+      "Um repositório é um endereço que lista arquivos de extensão. O Leaf não vem com nenhum; adicione um em que você confia. Instalar só copia o arquivo — ele ainda espera sua aprovação em Instaladas, e uma atualização pergunta de novo.",
     "extensionsView.repos.add": "Adicionar",
     "extensionsView.repos.install": "Instalar",
     "extensionsView.repos.update": "Atualizar",

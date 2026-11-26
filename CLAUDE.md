@@ -422,6 +422,16 @@ there while looking fine in desktop EPUB readers.
   loads; defaults are applied on read.
 - `welcomed` is separate from `output_root` being set, because "decide later" is
   a valid answer that must not re-prompt on every launch.
+- **Build settings live on devices** (`src-tauri/src/devices.rs`). A device is a
+  build profile (resolution → `Compression`, format, greyscale, spreads) plus a
+  delivery (`email` to its own address through the one shared SMTP account, or
+  `folder`, where an empty folder means "the plugged-in Kindle/Kobo", found by
+  its marker folders). Builds and "Send to" use the default device unless one is
+  named; `settings::profile`/`write_options` resolve it, so no caller reads the
+  old globals. A settings file from before devices becomes one device
+  (`devices::migrated`) only if it was already `welcomed`; the old
+  `compression`/`default_format`/`split_spreads` fields stay readable for that
+  and are no longer shown.
 - **Naming lives in `volume.rs`**, not the UI: `build_path` gives
   `<output>/<Series>/<Series v01.epub>`, and `file_stem` pads to `v01` so `v2`
   sorts before `v10`. A one-off "Build as…" and an unattended batch must produce

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { searchSeries, sourceLabel, type SeriesMatch } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 interface SeriesSearchProps {
@@ -33,6 +34,7 @@ export function SeriesSearch({
   onSelect,
   onError,
 }: SeriesSearchProps) {
+  const t = useT();
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SeriesMatch[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -46,7 +48,7 @@ export function SeriesSearch({
         const hits = await searchSeries(term);
         setResults(hits);
         if (hits.length === 0) {
-          onError("No matches. Try the original Japanese title.");
+          onError(t("seriesSearch.noMatches"));
         } else {
           onSelect(hits[0]);
         }
@@ -57,7 +59,7 @@ export function SeriesSearch({
         setSearching(false);
       }
     },
-    [onError, onSelect],
+    [onError, onSelect, t],
   );
 
   // A new session means a reopened dialog: reset, then search if we were given
@@ -71,12 +73,12 @@ export function SeriesSearch({
   }, [session]);
 
   return (
-    <div className="flex w-[336px] shrink-0 flex-col gap-3 border-r border-border p-4">
+    <div className="flex w-[336px] shrink-0 flex-col gap-3 border-r border-border p-4 max-sm:min-h-0 max-sm:w-full max-sm:flex-1 max-sm:border-r-0 max-sm:border-b">
       <div className="flex items-center gap-2">
         <Input
           autoFocus
           value={query}
-          placeholder="Series name…"
+          placeholder={t("seriesSearch.placeholder")}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") void runSearch(query);
@@ -91,7 +93,7 @@ export function SeriesSearch({
           without the slight inset. */}
       <div className="scrollbar-thin -mx-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1 py-0.5">
         {results === null && !searching && (
-          <p className="py-2 text-xs text-muted-foreground">Press Enter to search.</p>
+          <p className="py-2 text-xs text-muted-foreground">{t("seriesSearch.pressEnter")}</p>
         )}
         {results?.map((match) => (
           <button
@@ -116,7 +118,7 @@ export function SeriesSearch({
                 {match.title_english ?? match.title_romaji ?? match.title_native}
               </p>
               <p className="truncate text-[11px] text-muted-foreground">
-                {match.author ?? "Unknown author"}
+                {match.author ?? t("seriesSearch.unknownAuthor")}
                 {match.year ? ` · ${match.year}` : ""}
               </p>
               <Badge variant="outline" className="mt-1 self-start">

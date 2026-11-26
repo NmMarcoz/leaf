@@ -40,10 +40,12 @@ export const sendConfig = () => invoke<DeliveryStatus>("send_config");
 export const saveSendConfig = (config: DeliveryConfig, password: string | null) =>
   invoke<DeliveryStatus>("save_send_config", { config, password });
 
-export const sendTestEmail = () => invoke<void>("send_test_email");
+/** Prove a device is reachable: a test mail, or that its folder is there. */
+export const sendTestEmail = (device: string | null = null) =>
+  invoke<void>("send_test_email", { device });
 
-export const sendFiles = (paths: string[]) =>
-  invoke<SendReport>("send_files", { paths });
+export const sendFiles = (paths: string[], device: string | null = null) =>
+  invoke<SendReport>("send_files", { paths, device });
 
 /**
  * Server settings for the providers people actually use, so nobody has to go

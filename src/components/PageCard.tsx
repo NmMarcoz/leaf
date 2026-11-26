@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/tooltip";
 import { useThumbnail } from "@/hooks/useThumbnail";
 import { excludeLabel, fileName, type Page } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ function PageCardImpl({
   onToggleSplit,
   onSetCover,
 }: PageCardProps) {
+  const t = useT();
   // Request roughly double the display size so the grid stays sharp on HiDPI.
   const { ref, url, failed } = useThumbnail(page.path, Math.round(width * 2));
   const excluded = page.excluded !== null;
@@ -81,7 +83,7 @@ function PageCardImpl({
           {isCover && (
             <span className="flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary-foreground">
               <Star className="size-2.5 fill-current" />
-              Cover
+              {t("pageCard.cover")}
             </span>
           )}
         </div>
@@ -89,11 +91,11 @@ function PageCardImpl({
         <div className="pointer-events-none absolute right-1.5 top-1.5 flex flex-col items-end gap-1">
           {isSpread && (
             <Badge variant={page.split ? "warning" : "default"}>
-              {page.split ? "Split" : "Spread"}
+              {page.split ? t("pageCard.split") : t("pageCard.spread")}
             </Badge>
           )}
           {excluded && page.excluded && (
-            <Badge variant="destructive">{excludeLabel(page.excluded)}</Badge>
+            <Badge variant="destructive">{excludeLabel(page.excluded, t)}</Badge>
           )}
         </div>
 
@@ -107,35 +109,35 @@ function PageCardImpl({
           )}
           onClick={(e) => e.stopPropagation()}
         >
-          <Hint label={excluded ? "Include (X)" : "Exclude (X)"}>
+          <Hint label={excluded ? t("pageCard.include") : t("pageCard.exclude")}>
             <Button
               variant="secondary"
               size="icon-sm"
               onClick={onToggleExclude}
-              aria-label={excluded ? "Include page" : "Exclude page"}
+              aria-label={excluded ? t("pageCard.includePage") : t("pageCard.excludePage")}
             >
               <EyeOff className="size-3.5" />
             </Button>
           </Hint>
           {isSpread && (
-            <Hint label={page.split ? "Keep whole (S)" : "Split in two (S)"}>
+            <Hint label={page.split ? t("pageCard.keepWhole") : t("pageCard.splitInTwo")}>
               <Button
                 variant={page.split ? "default" : "secondary"}
                 size="icon-sm"
                 onClick={onToggleSplit}
-                aria-label="Toggle spread split"
+                aria-label={t("pageCard.toggleSplit")}
               >
                 <Scissors className="size-3.5" />
               </Button>
             </Hint>
           )}
-          <Hint label="Use as cover (C)">
+          <Hint label={t("pageCard.useAsCover")}>
             <Button
               variant="secondary"
               size="icon-sm"
               onClick={onSetCover}
               disabled={excluded}
-              aria-label="Use as cover"
+              aria-label={t("pageCard.useAsCoverAria")}
             >
               <Star className="size-3.5" />
             </Button>

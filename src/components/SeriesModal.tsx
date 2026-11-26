@@ -1,7 +1,10 @@
+import { ratingLabel, statusLabel } from "@/components/LibraryFilters";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   Check,
+  CircleAlert,
+  CircleCheck,
   Cloud,
   Download,
   ExternalLink,
@@ -14,8 +17,7 @@ import {
 import { RemoteImage } from "@/components/RemoteImage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Sheet, SheetBody, SheetFooter, SheetHeader, SheetStat } from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -23,7 +25,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Hint } from "@/components/ui/tooltip";
 import {
   languageName,
@@ -43,7 +44,6 @@ import {
 } from "@/lib/library";
 import { useT } from "@/lib/i18n";
 import type { ReaderTarget } from "@/lib/reader";
-import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 interface SeriesModalProps {
@@ -219,247 +219,306 @@ export function SeriesModal({
     [ensureAdded, onError],
   );
 
+  // What the design's three tiles count: published volumes (chapters with no
+  // volume are not one), chapters in this translation, and the translation.
+  const volumeCount = (layout ?? []).filter((v) => v.volume && v.volume !== "none").length;
+  const readable = flat.filter((c) => c.id && !c.unavailable);
+  const firstReadable = readable[0] ?? null;
+  const otherLanguages = Math.max(0, series.available_languages.length - 1);
+  const languageLabel = language ? languageName(language, t) : "—";
+
   return (
-    <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[88dvh] max-w-4xl">
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-          {/* ------------------------------------------------------ header */}
-          {/* A 160px cover next to a text column leaves a phone barely 180px to
-              set a description in, so there the cover goes above it instead. */}
-          <div className={cn("flex gap-6 p-6", isMobile && "flex-col gap-4")}>
-            <div
-              className={cn(
-                "flex items-center justify-center overflow-hidden rounded-lg bg-muted/40",
-                isMobile ? "h-52 w-36 self-start" : "h-[228px] w-40 shrink-0",
-              )}
-            >
-              {series.thumbnail_url ? (
-                <RemoteImage url={series.thumbnail_url} max={512} className="h-full w-full" />
-              ) : (
-                <BookOpen className="size-6 text-muted-foreground" />
-              )}
+    <Sheet open onClose={onClose} title={title}>
+      <SheetHeader
+        closeLabel={t("seriesModal.close")}
+        cover={
+          series.thumbnail_url ? (
+            <RemoteImage url={series.thumbnail_url} max={512} className="h-full w-full" />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <BookOpen className="size-6 text-on-ink-muted" />
             </div>
+          )
+        }
+        overline={
+          series.status
+            ? t("seriesModal.overlineStatus", { status: statusLabel(t, series.status) })
+            : t("seriesModal.overline")
+        }
+        title={title}
+        byline={[
+          series.author ?? t("seriesModal.unknownAuthor"),
+          series.artist && series.artist !== series.author ? series.artist : null,
+          series.year,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      />
 
-            <div className="flex min-w-0 flex-1 flex-col gap-3 pr-8">
-              <div className="flex flex-col gap-1">
-                <DialogTitle className="leading-tight">{title}</DialogTitle>
-                {/* Alternate titles only when they add something. */}
-                {altTitles && <p className="text-[11px] text-muted-foreground">{altTitles}</p>}
-              </div>
+      <SheetBody>
+        <div className="flex gap-2">
+          <SheetStat
+            value={layout === null ? "…" : volumeCount}
+            label={t("seriesModal.statVolumes")}
+          />
+          <SheetStat
+            value={layout === null ? "…" : flat.length}
+            label={t("seriesModal.statChapters")}
+          />
+          <SheetStat
+            value={languageLabel}
+            label={
+              otherLanguages > 0
+                ? t("seriesModal.statMoreLanguages", { count: otherLanguages })
+                : t("seriesModal.statTranslation")
+            }
+          />
+        </div>
 
-              <p className="text-xs text-muted-foreground">
-                {[
-                  series.author ?? t("seriesModal.unknownAuthor"),
-                  series.artist && series.artist !== series.author ? series.artist : null,
-                  series.year,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                {series.status && <span className="capitalize"> · {series.status}</span>}
-                {series.demographic && (
-                  <span className="capitalize"> · {series.demographic}</span>
-                )}
-              </p>
+        {/* Alternate titles only when they add something. */}
+        {altTitles && <p className="-mt-1 text-xs text-text-tertiary">{altTitles}</p>}
 
-              <div className="flex flex-wrap items-center gap-2">
-                {stats?.rating != null && (
-                  <Badge variant="outline">
-                    <Star className="size-2.5" />
-                    {stats.rating.toFixed(2)}
-                  </Badge>
-                )}
-                {stats?.follows != null && (
-                  <Badge variant="outline">
-                    <Users className="size-2.5" />
-                    {compact(stats.follows)}
-                  </Badge>
-                )}
-                {series.content_rating && (
-                  <Badge
-                    variant={series.content_rating === "safe" ? "outline" : "default"}
-                    className="capitalize"
-                  >
-                    {series.content_rating}
-                  </Badge>
-                )}
-                {series.site_url && (
-                  <Button variant="link" size="sm" asChild className="ml-1 text-xs">
-                    <a href={series.site_url} target="_blank" rel="noreferrer">
-                      <ExternalLink className="size-3!" />
-                      {sourceLabel(series.source)}
-                    </a>
-                  </Button>
-                )}
-              </div>
-
-              {series.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {series.tags.map((tag) => (
-                    <Badge key={tag.id} variant="secondary" className="font-normal">
-                      {tag.name}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              {series.description && (
-                <div className="flex flex-col items-start gap-1">
-                  <p
-                    className={cn(
-                      "text-xs leading-relaxed text-muted-foreground",
-                      !expanded && "line-clamp-4",
-                    )}
-                  >
-                    {series.description}
-                  </p>
-                  {series.description.length > 300 && (
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="text-[11px]"
-                      onClick={() => setExpanded((v) => !v)}
-                    >
-                      {expanded ? t("seriesModal.showLess") : t("seriesModal.showMore")}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* ---------------------------------------------------- chapters */}
-          <div
-            className={cn(
-              "gap-4 px-6 py-4",
-              isMobile ? "flex flex-col items-stretch" : "flex items-end",
-            )}
-          >
-            <div className="flex flex-col gap-1.5">
-              <Label
-                htmlFor="language"
-                className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-              >
-                {t("seriesModal.translation")}
-              </Label>
-              <Select
-                value={language ?? ""}
-                onValueChange={(v) => setLanguage(v)}
-                disabled={series.available_languages.length === 0}
-              >
-                <SelectTrigger id="language" className={isMobile ? "w-full" : "w-56"}>
-                  <SelectValue placeholder={t("seriesModal.noTranslationsListed")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {series.available_languages.map((code) => (
-                    <SelectItem key={code} value={code}>
-                      {languageName(code)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
+        {series.description && (
+          <div className="flex flex-col items-start gap-1">
             <p
               className={cn(
-                "text-[11px] text-muted-foreground",
-                isMobile ? "-mt-1" : "flex-1 pb-2.5",
+                "text-sm leading-5 text-text-secondary",
+                !expanded && "line-clamp-5",
               )}
             >
-              {series.available_languages.length > 1 &&
-                t("seriesModal.translationsAvailable", {
-                  count: series.available_languages.length,
-                })}
-              {layout && t("seriesModal.chaptersInThis", { count: flat.length })}
+              {series.description}
             </p>
-
-            {owned ? (
-              <Button variant="outline" onClick={() => onOpenSeries(owned.id)}>
-                <Check />
-                {t("seriesModal.inYourLibrary")}
-              </Button>
-            ) : (
-              <Button onClick={() => void add()} disabled={adding}>
-                {adding ? <Loader2 className="animate-spin" /> : <Plus />}
-                {t("seriesModal.addToLibrary")}
+            {series.description.length > 300 && (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto px-0 text-xs"
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? t("seriesModal.showLess") : t("seriesModal.showMore")}
               </Button>
             )}
           </div>
+        )}
 
-          <div className="px-6 pb-6">
-            {layout === null ? (
-              <p className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> {t("seriesModal.loadingChapters")}
-              </p>
-            ) : flat.length === 0 ? (
-              <p className="py-4 text-xs text-muted-foreground">
-                {t("seriesModal.noChaptersInTranslation")}
-                {series.available_languages.length > 1 && t("seriesModal.tryAnotherOne")}
-              </p>
-            ) : (
-              <div className="-mx-6 max-h-80 overflow-y-auto border-y border-border">
-                {layout.map((volume) => (
-                  <div key={volume.volume}>
-                    <p className="sticky top-0 z-10 bg-muted px-6 py-2 text-[10px] font-medium text-muted-foreground">
-                      {t("seriesModal.volumeHeader", {
-                        volume: volume.volume,
-                        count: volume.chapters.length,
-                      })}
-                    </p>
-                    {volume.chapters.map((chapter) => (
-                      <ChapterRow
-                        key={`${volume.volume}-${chapter.number}`}
-                        chapter={chapter}
-                        busy={fetching === chapter.number}
-                        onRead={() => readChapter(chapter)}
-                        onGet={() => void getChapter(chapter)}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
+        {(series.tags.length > 0 || series.content_rating) && (
+          <div className="flex flex-wrap gap-1.5">
+            {series.content_rating && series.content_rating !== "safe" && (
+              <span className="rounded-full bg-warning-soft px-2.5 py-1 text-xs font-medium text-warning">
+                {ratingLabel(t, series.content_rating)}
+              </span>
             )}
+            {series.tags.map((tag) => (
+              <span
+                key={tag.id}
+                className="rounded-full border border-line px-2.5 py-1 text-xs font-medium text-text-secondary"
+              >
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {(stats?.rating != null || stats?.follows != null) && (
+          <p className="flex items-center gap-3 text-xs text-text-tertiary">
+            {stats?.rating != null && (
+              <span className="flex items-center gap-1">
+                <Star className="size-3" /> {stats.rating.toFixed(2)}
+              </span>
+            )}
+            {stats?.follows != null && (
+              <span className="flex items-center gap-1">
+                <Users className="size-3" /> {compact(stats.follows)}
+              </span>
+            )}
+          </p>
+        )}
+
+        {/* Whether a volume can actually be made from this, said before the
+            user commits to anything — the question this panel exists for. */}
+        {layout !== null && (
+          <Availability
+            total={flat.length}
+            readable={readable.length}
+            volumes={volumeCount}
+            language={languageLabel}
+            source={sourceLabel(series.source)}
+          />
+        )}
+
+        <section className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <h3 className="type-overline flex-1">{t("seriesModal.translation")}</h3>
+            <Select
+              value={language ?? ""}
+              onValueChange={(v) => setLanguage(v)}
+              disabled={series.available_languages.length === 0}
+            >
+              <SelectTrigger className="h-8 w-48 text-xs" aria-label={t("seriesModal.translation")}>
+                <SelectValue placeholder={t("seriesModal.noTranslationsListed")} />
+              </SelectTrigger>
+              <SelectContent>
+                {series.available_languages.map((code) => (
+                  <SelectItem key={code} value={code}>
+                    {languageName(code, t)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* ----------------------------------------------------- similar */}
-          {similar.length > 0 && (
-            <div className="flex flex-col gap-3 px-6 pb-6">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {/* Deliberately not called "similar": this is a tag search,
-                    and MangaDex publishes no similarity ranking. */}
-                {t("seriesModal.moreWithTheseTags")}
-              </p>
-              <div className="scrollbar-thin flex gap-3 overflow-x-auto pb-1">
-                {similar.map((other) => (
-                  <button
-                    key={other.id}
-                    onClick={() => onPick(other)}
-                    className="w-24 shrink-0 text-left"
-                  >
-                    <div className="flex aspect-[10/15] items-center justify-center overflow-hidden rounded-md bg-muted/40">
-                      {other.thumbnail_url ? (
-                        <RemoteImage
-                          url={other.thumbnail_url}
-                          max={256}
-                          className="h-full w-full"
-                          imageClassName="transition-opacity hover:opacity-80"
-                        />
-                      ) : (
-                        <BookOpen className="size-4 text-muted-foreground" />
-                      )}
-                    </div>
-                    <p className="mt-1.5 line-clamp-2 text-[10px] leading-tight">
-                      {other.title_english ?? other.title_romaji ?? other.title_native}
-                    </p>
-                  </button>
-                ))}
-              </div>
+          {layout === null ? (
+            <p className="flex items-center gap-2 py-2 text-xs text-text-secondary">
+              <Loader2 className="size-3.5 animate-spin" /> {t("seriesModal.loadingChapters")}
+            </p>
+          ) : flat.length === 0 ? (
+            <p className="py-2 text-xs text-text-secondary">
+              {t("seriesModal.noChaptersInTranslation")}
+              {series.available_languages.length > 1 && t("seriesModal.tryAnotherOne")}
+            </p>
+          ) : (
+            <div className="max-h-72 overflow-y-auto rounded-xl border border-line">
+              {layout.map((volume) => (
+                <div key={volume.volume}>
+                  <p className="sticky top-0 z-10 bg-sunken px-3.5 py-1.5 text-[11px] font-medium text-text-secondary">
+                    {t("seriesModal.volumeHeader", {
+                      volume: volume.volume,
+                      count: volume.chapters.length,
+                    })}
+                  </p>
+                  {volume.chapters.map((chapter) => (
+                    <ChapterRow
+                      key={`${volume.volume}-${chapter.number}`}
+                      chapter={chapter}
+                      busy={fetching === chapter.number}
+                      onRead={() => readChapter(chapter)}
+                      onGet={() => void getChapter(chapter)}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
           )}
+        </section>
+
+        {similar.length > 0 && (
+          <section className="flex flex-col gap-2.5">
+            <h3 className="type-overline">
+              {/* Deliberately not called "similar": this is a tag search,
+                  and MangaDex publishes no similarity ranking. */}
+              {t("seriesModal.moreWithTheseTags")}
+            </h3>
+            <div className="scrollbar-none -mx-7 flex gap-3 overflow-x-auto px-7 pb-1 max-sm:-mx-5 max-sm:px-5">
+              {similar.map((other) => (
+                <button
+                  key={other.id}
+                  onClick={() => onPick(other)}
+                  className="w-20 shrink-0 text-left"
+                >
+                  <div className="flex aspect-[2/3] items-center justify-center overflow-hidden rounded-md bg-sunken">
+                    {other.thumbnail_url ? (
+                      <RemoteImage
+                        url={other.thumbnail_url}
+                        max={256}
+                        className="h-full w-full"
+                        imageClassName="transition-opacity hover:opacity-80"
+                      />
+                    ) : (
+                      <BookOpen className="size-4 text-text-tertiary" />
+                    )}
+                  </div>
+                  <p className="mt-1.5 line-clamp-2 text-[11px] leading-tight">
+                    {other.title_english ?? other.title_romaji ?? other.title_native}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+      </SheetBody>
+
+      <SheetFooter>
+        {owned ? (
+          <Button className="w-full" onClick={() => onOpenSeries(owned.id)}>
+            <Check />
+            {t("seriesModal.openOnShelf")}
+          </Button>
+        ) : (
+          <Button className="w-full" onClick={() => void add()} disabled={adding}>
+            {adding ? <Loader2 className="animate-spin" /> : <Plus />}
+            {t("seriesModal.addToLibrary")}
+          </Button>
+        )}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="min-w-0 flex-1"
+            disabled={!firstReadable}
+            onClick={() => firstReadable && readChapter(firstReadable)}
+          >
+            <BookOpen />
+            <span className="truncate">
+              {firstReadable
+                ? t("seriesModal.readChapter", { number: firstReadable.number })
+                : t("seriesModal.nothingToRead")}
+            </span>
+          </Button>
+          {series.site_url && (
+            <Button variant="ghost" asChild className="shrink-0">
+              <a href={series.site_url} target="_blank" rel="noreferrer">
+                <ExternalLink />
+                {sourceLabel(series.source)}
+              </a>
+            </Button>
+          )}
         </div>
-      </DialogContent>
-    </Dialog>
+        {!owned && <p className="text-xs text-text-tertiary">{t("seriesModal.addHint")}</p>}
+      </SheetFooter>
+    </Sheet>
+  );
+}
+
+/** "All 140 chapters available…" — green when a volume can be made from it. */
+function Availability({
+  total,
+  readable,
+  volumes,
+  language,
+  source,
+}: {
+  total: number;
+  readable: number;
+  volumes: number;
+  language: string;
+  source: string;
+}) {
+  const t = useT();
+  if (total === 0) return null;
+  const all = readable === total;
+  return (
+    <div
+      className={cn(
+        "flex items-start gap-2 rounded-[10px] px-3 py-2.5 text-xs text-text-secondary",
+        all ? "bg-success-soft" : "bg-warning-soft",
+      )}
+    >
+      {all ? (
+        <CircleCheck className="mt-px size-3.5 shrink-0 text-success" />
+      ) : (
+        <CircleAlert className="mt-px size-3.5 shrink-0 text-warning" />
+      )}
+      <p>
+        {all
+          ? volumes > 1
+            ? t("seriesModal.availableAll", { count: total, language, source, volumes })
+            : volumes === 1
+              ? t("seriesModal.availableAllOneVolume", { count: total, language, source })
+            : t("seriesModal.availableAllNoVolumes", { count: total, language, source })
+          : readable === 0
+            ? t("seriesModal.availableNone", { source })
+            : t("seriesModal.availableSome", { readable, count: total, language, source })}
+      </p>
+    </div>
   );
 }
 
@@ -480,14 +539,14 @@ function ChapterRow({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 border-b border-border px-6 py-2 last:border-b-0",
-        !fetchable && "bg-amber-500/5",
+        "flex items-center gap-3 border-b border-line px-3.5 py-1.5 last:border-b-0",
+        !fetchable && "bg-warning-soft/40",
       )}
     >
       <span className="min-w-0 flex-1 truncate text-xs font-medium">
         {t("seriesModal.chapterTitle", { number: chapter.number })}
         {!fetchable && (
-          <span className="ml-2 text-[11px] font-normal text-amber-500">
+          <span className="ml-2 text-[11px] font-normal text-warning">
             {t("seriesModal.notHostedBySource")}
           </span>
         )}

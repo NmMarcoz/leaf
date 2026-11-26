@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookOpen, Check, Compass, Loader2, Search, SlidersHorizontal } from "lucide-react";
+import { BookOpen, Check, Compass, Globe, Loader2, Search, SlidersHorizontal } from "lucide-react";
 
 import { BrowseFilters, FilterSummary } from "@/components/BrowseFilters";
 import { RemoteImage } from "@/components/RemoteImage";
 import { SeriesModal } from "@/components/SeriesModal";
 import { SourceSeriesModal } from "@/components/SourceSeriesModal";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Chip } from "@/components/ui/chip";
 import {
   Select,
   SelectContent,
@@ -61,6 +61,8 @@ interface ExploreViewProps {
   onOpenSeries: (id: number) => void;
   /** Read a chapter straight from the source, without downloading it. */
   onRead: (target: ReaderTarget) => void;
+  /** Settings → Extensions, from the source card's "Manage". */
+  onManageSources: () => void;
   onError: (message: string | null) => void;
 }
 
@@ -113,15 +115,15 @@ export function ExploreView(props: ExploreViewProps) {
   return (
     <MangaDexExplore
       {...props}
-      sourcePicker={
-        otherSources.length > 0 ? (
-          <SourcePicker value={MANGADEX} sources={otherSources} onChange={setSource} />
-        ) : null
-      }
+      sourcePicker={<SourcePicker value={MANGADEX} sources={otherSources} onChange={setSource} />}
     />
   );
 }
 
+/**
+ * Which catalogue is being browsed — the design's "Source" card: an overline
+ * over the picked name, in a raised box beside the title.
+ */
 function SourcePicker({
   value,
   sources,
@@ -131,10 +133,23 @@ function SourcePicker({
   sources: SourceInfo[];
   onChange: (id: string) => void;
 }) {
+  const t = useT();
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-40 shrink-0">
-        <SelectValue />
+      <SelectTrigger
+        className="h-auto w-auto min-w-[200px] gap-3 rounded-xl px-3 py-2 text-left"
+        aria-label={t("exploreView.source")}
+      >
+        <Globe className="size-4 shrink-0 text-text-secondary" />
+        {/* A div, not a span: the trigger line-clamps its direct span children. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="font-mono text-[10px] font-medium uppercase leading-3 tracking-[0.06em] text-text-tertiary">
+            {t("exploreView.source")}
+          </span>
+          <div className="truncate text-[13px] font-medium leading-5">
+            <SelectValue />
+          </div>
+        </div>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={MANGADEX}>MangaDex</SelectItem>
@@ -163,6 +178,7 @@ function MangaDexExplore({
   onBrowseChange,
   onOpenSeries,
   onRead,
+  onManageSources,
   onError,
   sourcePicker,
 }: ExploreViewProps & { sourcePicker: ReactNode }) {
@@ -277,76 +293,108 @@ function MangaDexExplore({
     [owned],
   );
 
+  const presets: { key: string; label: string; fields: Partial<BrowseQuery> }[] = [
+    { key: "popular", label: t("exploreView.presetPopular"), fields: { sort: "follows", descending: true, status: [] } },
+    { key: "latest", label: t("exploreView.presetLatest"), fields: { sort: "latest-upload", descending: true, status: [] } },
+    { key: "new", label: t("exploreView.presetNew"), fields: { sort: "recently-added", descending: true, status: [] } },
+    { key: "rated", label: t("exploreView.presetRated"), fields: { sort: "rating", descending: true, status: [] } },
+    { key: "ongoing", label: t("exploreView.presetOngoing"), fields: { sort: "follows", descending: true, status: ["ongoing"] } },
+    { key: "completed", label: t("exploreView.presetCompleted"), fields: { sort: "follows", descending: true, status: ["completed"] } },
+  ];
+  const presetActive = (fields: Partial<BrowseQuery>) =>
+    !query.title &&
+    query.sort === fields.sort &&
+    query.descending === fields.descending &&
+    query.status.join() === (fields.status ?? []).join();
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card/60 px-5 py-3">
-        <h1 className="mr-2 text-sm font-semibold">{t("exploreView.title")}</h1>
-        {sourcePicker}
-        {/* A floor on its width, and a header that wraps: a phone-width row
-            otherwise squeezes this to just its clear button, and a field with
-            no room for text keeps the caret at 0, so every letter lands in
-            front of the last ("Ichi" typed in arrives as "ihcI"). */}
-        <Input
+    <main
+      ref={scroll.ref}
+      onScroll={scroll.onScroll}
+      className="scrollbar-thin h-full overflow-y-auto"
+    >
+      <div className="mx-auto flex max-w-[1048px] flex-col gap-5 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
+        <ExploreHeader
+          subtitle={
+            total > 0
+              ? t("exploreView.totalOn", { total: total.toLocaleString(), source: "MangaDex" })
+              : t("exploreView.subtitleMangaDex")
+          }
+          picker={sourcePicker}
+          onManage={onManageSources}
+        />
+
+        <SearchBar
           value={text}
           placeholder={t("exploreView.searchPlaceholder")}
-          className="min-w-40 max-w-sm flex-1"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submitSearch();
-          }}
+          onChange={setText}
+          onSubmit={submitSearch}
+          trailing={
+            <Button
+              variant={showFilters || isFiltered(query) ? "default" : "secondary"}
+              size="sm"
+              className="h-9 shrink-0"
+              onClick={() => setShowFilters((open) => !open)}
+              aria-pressed={showFilters}
+            >
+              <SlidersHorizontal />
+              <span className="max-sm:sr-only">{t("exploreView.filters")}</span>
+            </Button>
+          }
         />
-        <Button variant="outline" size="icon" onClick={submitSearch}>
-          <Search />
-        </Button>
 
-        <Button
-          variant={showFilters || isFiltered(query) ? "default" : "ghost"}
-          size="sm"
-          onClick={() => setShowFilters((open) => !open)}
-        >
-          <SlidersHorizontal />
-          {t("exploreView.filters")}
-        </Button>
+        {showFilters ? (
+          <div className="overflow-hidden rounded-xl border border-line bg-raised">
+            <BrowseFilters
+              query={query}
+              tags={tags}
+              onChange={patch}
+              onReset={() => {
+                setText("");
+                setQuery(defaultQuery());
+              }}
+            />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div
+              role="radiogroup"
+              aria-label={t("exploreView.presets")}
+              className="scrollbar-none -mx-5 flex gap-1.5 overflow-x-auto px-5 sm:mx-0 sm:flex-wrap sm:px-0"
+            >
+              {presets.map((preset) => (
+                <Chip
+                  key={preset.key}
+                  selected={presetActive(preset.fields)}
+                  className="h-[30px] px-3.5"
+                  onClick={() => {
+                    setText("");
+                    patch({ ...preset.fields, title: null });
+                  }}
+                >
+                  {preset.label}
+                </Chip>
+              ))}
+            </div>
+            <FilterSummary query={query} tags={tags} />
+          </div>
+        )}
 
-        {!showFilters && <FilterSummary query={query} tags={tags} />}
-
-        <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
-          {total > 0 && t("exploreView.totalSeries", { total: total.toLocaleString() })}
-        </span>
-      </header>
-
-      {showFilters && (
-        <BrowseFilters
-          query={query}
-          tags={tags}
-          onChange={patch}
-          onReset={() => {
-            setText("");
-            setQuery(defaultQuery());
-          }}
-        />
-      )}
-
-      <main
-        ref={scroll.ref}
-        onScroll={scroll.onScroll}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5"
-      >
         {results.length === 0 && loading ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" /> {t("exploreView.loading")}
+          <div className="flex items-center gap-2 text-sm text-text-secondary">
+            <Loader2 className="size-4 animate-spin" /> {t("exploreView.loading")}
           </div>
         ) : results.length === 0 ? (
-          <div className="mx-auto mt-20 max-w-md text-center">
-            <Compass className="mx-auto size-8 text-muted-foreground" />
-            <h2 className="mt-3 text-sm font-medium">{t("exploreView.noMatchesTitle")}</h2>
+          <div className="mx-auto mt-12 max-w-md text-center">
+            <Compass className="mx-auto size-8 text-text-tertiary" />
+            <h2 className="mt-3 type-heading">{t("exploreView.noMatchesTitle")}</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               {t("exploreView.noMatchesDescription")}
             </p>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-x-4 gap-y-6">
               {results.map((match) => (
                 <ResultCard
                   key={`${match.source}-${match.id}`}
@@ -367,7 +415,7 @@ function MangaDexExplore({
             )}
           </>
         )}
-      </main>
+      </div>
 
       {selected && (
         <SeriesModal
@@ -383,7 +431,112 @@ function MangaDexExplore({
           onError={onError}
         />
       )}
+    </main>
+  );
+}
+
+/** The top of Discover, whichever catalogue is showing (Figma 15 · Descobrir). */
+function ExploreHeader({
+  subtitle,
+  picker,
+  onManage,
+}: {
+  subtitle: ReactNode;
+  picker: ReactNode;
+  onManage: () => void;
+}) {
+  const t = useT();
+  return (
+    <header className="flex flex-wrap items-center gap-x-5 gap-y-3">
+      {/* A full row on a phone: beside the source card the title was
+          squeezed until the card drew over it. */}
+      <div className="min-w-0 flex-1 max-sm:basis-full">
+        <h1 className="type-display max-sm:text-[32px] max-sm:leading-9">{t("exploreView.title")}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{subtitle}</p>
+      </div>
+      {picker}
+      <Button variant="link" className="text-sm" onClick={onManage}>
+        {t("exploreView.manage")}
+      </Button>
+    </header>
+  );
+}
+
+/**
+ * The search field, big and on its own row, with filters inside its right end.
+ *
+ * Its value lives at the top of the app (it survives opening a series), so
+ * every keystroke re-renders from there — fine on a desktop, and the reason
+ * the field has a floor on its width: squeezed to nothing on a phone, the
+ * caret stayed at 0 and every letter landed in front of the last.
+ */
+function SearchBar({
+  value,
+  placeholder,
+  onChange,
+  onSubmit,
+  trailing,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="flex h-12 min-w-0 items-center gap-3 rounded-xl border border-line-strong bg-raised pl-4 pr-1.5 focus-within:ring-2 focus-within:ring-ring/40">
+      <button type="button" onClick={onSubmit} aria-label={placeholder} className="shrink-0">
+        <Search className="size-4 text-text-tertiary" />
+      </button>
+      <input
+        type="search"
+        enterKeyHint="search"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+        }}
+        className="min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-text-tertiary"
+      />
+      {trailing}
     </div>
+  );
+}
+
+/** Cover, title, one line of detail — the design's discovery card. */
+function DiscoverCard({
+  title,
+  detail,
+  cover,
+  owned,
+  onSelect,
+}: {
+  title: string;
+  detail?: string;
+  cover: string | null;
+  owned: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button onClick={onSelect} className="group flex min-w-0 flex-col gap-2 text-left">
+      <span className="relative flex aspect-[2/3] w-full items-center justify-center overflow-hidden rounded-[10px] bg-sunken ring-1 ring-line/70 transition-transform group-hover:-translate-y-0.5">
+        {cover ? (
+          <RemoteImage url={cover} max={256} className="h-full w-full" />
+        ) : (
+          <BookOpen className="size-5 text-text-tertiary" />
+        )}
+        {owned && (
+          <span className="absolute right-2 top-2 rounded-full bg-strong p-1">
+            <Check className="size-2.5 text-on-strong" />
+          </span>
+        )}
+      </span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-medium leading-5">{title}</span>
+        {detail && <span className="truncate text-xs text-text-secondary">{detail}</span>}
+      </span>
+    </button>
   );
 }
 
@@ -398,32 +551,13 @@ function ResultCard({
 }) {
   const t = useT();
   return (
-    <button
-      onClick={onSelect}
-      className="flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-muted-foreground/40"
-    >
-      <div className="relative flex aspect-[10/15] items-center justify-center bg-muted/40">
-        {match.thumbnail_url ? (
-          <RemoteImage url={match.thumbnail_url} max={256} className="h-full w-full" />
-        ) : (
-          <BookOpen className="size-5 text-muted-foreground" />
-        )}
-        {owned && (
-          <span className="absolute right-2 top-2 rounded-full bg-primary p-1">
-            <Check className="size-2.5 text-primary-foreground" />
-          </span>
-        )}
-      </div>
-      <div className="flex flex-col gap-1 px-3 pb-3 pt-2.5">
-        <p className="truncate text-xs font-medium">
-          {match.title_english ?? match.title_romaji ?? match.title_native}
-        </p>
-        <p className="truncate text-[11px] text-muted-foreground">
-          {match.author ?? t("exploreView.unknownAuthor")}
-          {match.year ? ` · ${match.year}` : ""}
-        </p>
-      </div>
-    </button>
+    <DiscoverCard
+      title={match.title_english ?? match.title_romaji ?? match.title_native ?? ""}
+      detail={[match.author ?? t("exploreView.unknownAuthor"), match.year].filter(Boolean).join(" · ")}
+      cover={match.thumbnail_url}
+      owned={owned}
+      onSelect={onSelect}
+    />
   );
 }
 
@@ -442,6 +576,7 @@ function RegisteredSourceExplore({
   onSourceChange,
   onOpenSeries,
   onRead,
+  onManageSources,
   onError,
 }: {
   sourceId: string;
@@ -449,6 +584,7 @@ function RegisteredSourceExplore({
   onSourceChange: (id: string) => void;
   onOpenSeries: (id: number) => void;
   onRead: (target: ReaderTarget) => void;
+  onManageSources: () => void;
   onError: (message: string | null) => void;
 }) {
   const t = useT();
@@ -519,61 +655,54 @@ function RegisteredSourceExplore({
     [owned, sourceId],
   );
 
+  const current = sources.find((source) => source.id === sourceId);
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card/60 px-5 py-3">
-        <h1 className="mr-2 text-sm font-semibold">{t("exploreView.title")}</h1>
-        <SourcePicker value={sourceId} sources={sources} onChange={onSourceChange} />
+    <main
+      ref={scroll.ref}
+      onScroll={scroll.onScroll}
+      className="scrollbar-thin h-full overflow-y-auto"
+    >
+      <div className="mx-auto flex max-w-[1048px] flex-col gap-5 px-5 pb-10 pt-3 sm:px-10 sm:pt-8">
+        <ExploreHeader
+          subtitle={current?.description || t("exploreView.subtitleSource", { source: current?.name ?? sourceId })}
+          picker={<SourcePicker value={sourceId} sources={sources} onChange={onSourceChange} />}
+          onManage={onManageSources}
+        />
 
-        <div className="flex shrink-0 rounded-md border border-border p-0.5">
-          <Button
-            variant={mode === "popular" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setMode("popular")}
-          >
-            {t("exploreView.popular")}
-          </Button>
-          <Button
-            variant={mode === "latest" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setMode("latest")}
-          >
-            {t("exploreView.latest")}
-          </Button>
-        </div>
-
-        <Input
+        <SearchBar
           value={text}
           placeholder={t("exploreView.searchSourcePlaceholder")}
-          className="min-w-40 max-w-sm flex-1"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submitSearch();
-          }}
+          onChange={setText}
+          onSubmit={submitSearch}
         />
-        <Button variant="outline" size="icon" onClick={submitSearch}>
-          <Search />
-        </Button>
-      </header>
 
-      <main
-        ref={scroll.ref}
-        onScroll={scroll.onScroll}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-5"
-      >
+        <div
+          role="radiogroup"
+          aria-label={t("exploreView.presets")}
+          className="flex gap-1.5"
+        >
+          <Chip selected={mode === "popular"} className="h-[30px] px-3.5" onClick={() => setMode("popular")}>
+            {t("exploreView.popular")}
+          </Chip>
+          <Chip selected={mode === "latest"} className="h-[30px] px-3.5" onClick={() => setMode("latest")}>
+            {t("exploreView.latest")}
+          </Chip>
+        </div>
+
         {results.length === 0 && loading ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" /> {t("exploreView.loading")}
+          <div className="flex items-center gap-2 text-sm text-text-secondary">
+            <Loader2 className="size-4 animate-spin" /> {t("exploreView.loading")}
           </div>
         ) : results.length === 0 ? (
-          <div className="mx-auto mt-20 max-w-md text-center">
-            <Compass className="mx-auto size-8 text-muted-foreground" />
-            <h2 className="mt-3 text-sm font-medium">{t("exploreView.emptyTitle")}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{t("exploreView.emptyDescription")}</p>
+          <div className="mx-auto mt-12 max-w-md text-center">
+            <Compass className="mx-auto size-8 text-text-tertiary" />
+            <h2 className="mt-3 type-heading">{t("exploreView.emptyTitle")}</h2>
+            <p className="mt-1 text-sm text-text-secondary">{t("exploreView.emptyDescription")}</p>
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-x-4 gap-y-6">
               {results.map((manga) => (
                 <SourceResultCard
                   key={manga.id}
@@ -594,11 +723,12 @@ function RegisteredSourceExplore({
             )}
           </>
         )}
-      </main>
+      </div>
 
       {selected && (
         <SourceSeriesModal
           source={sourceId}
+          sourceName={sources.find((s) => s.id === sourceId)?.name ?? sourceId}
           manga={selected}
           owned={ownedFor(selected)}
           onClose={() => setSelected(null)}
@@ -608,7 +738,7 @@ function RegisteredSourceExplore({
           onError={onError}
         />
       )}
-    </div>
+    </main>
   );
 }
 
@@ -622,25 +752,6 @@ function SourceResultCard({
   onSelect: () => void;
 }) {
   return (
-    <button
-      onClick={onSelect}
-      className="flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-muted-foreground/40"
-    >
-      <div className="relative flex aspect-[10/15] items-center justify-center bg-muted/40">
-        {manga.cover_url ? (
-          <RemoteImage url={manga.cover_url} max={256} className="h-full w-full" />
-        ) : (
-          <BookOpen className="size-5 text-muted-foreground" />
-        )}
-        {owned && (
-          <span className="absolute right-2 top-2 rounded-full bg-primary p-1">
-            <Check className="size-2.5 text-primary-foreground" />
-          </span>
-        )}
-      </div>
-      <div className="flex flex-col gap-1 px-3 pb-3 pt-2.5">
-        <p className="truncate text-xs font-medium">{manga.title}</p>
-      </div>
-    </button>
+    <DiscoverCard title={manga.title} cover={manga.cover_url} owned={owned} onSelect={onSelect} />
   );
 }

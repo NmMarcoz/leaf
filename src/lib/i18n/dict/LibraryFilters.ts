@@ -15,6 +15,13 @@ const dict: PartialDictionary = {
     "libraryFilters.groupByRating": "Group by rating",
     "libraryFilters.groupByStatus": "Group by status",
     "libraryFilters.clear": "Clear",
+    "libraryFilters.statusOngoing": "ongoing",
+    "libraryFilters.statusCompleted": "completed",
+    "libraryFilters.statusHiatus": "hiatus",
+    "libraryFilters.statusCancelled": "cancelled",
+    "libraryFilters.untagged": "Untagged",
+    "libraryFilters.unrated": "Unrated",
+    "libraryFilters.unknown": "Unknown",
   },
   "pt-BR": {
     "libraryFilters.tags": "Tags",
@@ -31,6 +38,13 @@ const dict: PartialDictionary = {
     "libraryFilters.groupByRating": "Agrupar por classificação",
     "libraryFilters.groupByStatus": "Agrupar por status",
     "libraryFilters.clear": "Limpar",
+    "libraryFilters.statusOngoing": "em andamento",
+    "libraryFilters.statusCompleted": "concluída",
+    "libraryFilters.statusHiatus": "em hiato",
+    "libraryFilters.statusCancelled": "cancelada",
+    "libraryFilters.untagged": "Sem tag",
+    "libraryFilters.unrated": "Sem classificação",
+    "libraryFilters.unknown": "Desconhecido",
   },
 };
 
