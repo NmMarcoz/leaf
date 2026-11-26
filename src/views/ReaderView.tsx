@@ -647,12 +647,23 @@ export function ReaderView({
               </p>
 
               <div className="mt-5 flex items-center justify-center gap-2">
-                <Button variant="outline" onClick={onExit}>
+                {/* Restyled for the ink surface: the default ink button
+                    disappears into it, and the outline one turns paper. The
+                    way onward is the paper one when there is somewhere to go. */}
+                <Button
+                  variant="ghost"
+                  onClick={onExit}
+                  className={cn(
+                    failure.externalUrl
+                      ? "bg-ink-raised text-on-ink hover:bg-ink-raised/80 hover:text-on-ink"
+                      : "bg-on-ink text-ink hover:bg-on-ink/90 hover:text-ink",
+                  )}
+                >
                   <ArrowLeft />
                   {t("readerView.goBack")}
                 </Button>
                 {failure.externalUrl && (
-                  <Button asChild>
+                  <Button asChild className="bg-on-ink text-ink hover:bg-on-ink/90">
                     <a
                       href={failure.externalUrl}
                       target="_blank"

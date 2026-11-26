@@ -214,13 +214,11 @@
     user-select: none;
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
-    /* A notch, where the platform tells CSS about one. Android does not — it
-       offers system bar insets to the view hierarchy instead, which is why
-       `MainActivity.kt` pads the window rather than leaving it to this. These
-       resolve to zero on desktop and on any phone without a cutout. */
-    padding-top: env(safe-area-inset-top);
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+    /* No `env(safe-area-inset-*)` padding here. `MainActivity.kt` already
+       pads the window for the system bars *and* the display cutout, yet the
+       WebView still reports the cutout to CSS — so padding for it here as well
+       left a second, 42px empty band under the status bar on a phone with a
+       camera hole. Desktop reports zero either way. */
     /* Pull-to-refresh and rubber-banding are browser gestures, and this is not
        a page to refresh. Scrolling inside the reader is unaffected. */
     overscroll-behavior: none;
