@@ -358,8 +358,13 @@ export const volumesSource = (source: string, externalId: string) =>
 
 export const scanFolder = (path: string) => invoke<Volume>("scan", { path });
 
-export const buildVolume = (volume: Volume, out: string, format: Format) =>
-  invoke<BuildReport>("build", { volume, out, format });
+/** `device` picks whose page size and greyscale to write for; `null` = default. */
+export const buildVolume = (
+  volume: Volume,
+  out: string,
+  format: Format,
+  device: string | null = null,
+) => invoke<BuildReport>("build", { volume, out, format, device });
 
 export const suggestFilename = (volume: Volume, format: Format) =>
   invoke<string>("suggest_filename", { volume, format });

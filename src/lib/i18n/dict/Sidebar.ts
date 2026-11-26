@@ -10,7 +10,8 @@ const dict: PartialDictionary = {
     "sidebar.kindle": "Kindle",
     "sidebar.byEmail": "E-mail · {email}",
     "sidebar.noDevice": "No device yet",
-    "sidebar.setUpDevice": "Set up sending to a Kindle",
+    "sidebar.setUpDevice": "Add the reader you build for",
+    "sidebar.manageDevices": "Manage devices…",
   },
   "pt-BR": {
     "sidebar.library": "Estante",
@@ -21,7 +22,8 @@ const dict: PartialDictionary = {
     "sidebar.kindle": "Kindle",
     "sidebar.byEmail": "E-mail · {email}",
     "sidebar.noDevice": "Nenhum dispositivo",
-    "sidebar.setUpDevice": "Configure o envio para o Kindle",
+    "sidebar.setUpDevice": "Adicione o leitor para o qual você gera",
+    "sidebar.manageDevices": "Gerenciar dispositivos…",
   },
 };
 

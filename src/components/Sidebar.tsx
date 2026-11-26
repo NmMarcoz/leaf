@@ -1,12 +1,25 @@
-import { useEffect, useState } from "react";
-import { BookOpen, ChevronRight, Compass, ListChecks, Settings } from "lucide-react";
+import { useState } from "react";
+import {
+  BookOpen,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Compass,
+  ListChecks,
+  Settings,
+} from "lucide-react";
 
 import type { UpdateStage } from "@/hooks/useUpdater";
 import { LogoMark } from "@/components/Logo";
 import { useT } from "@/lib/i18n";
 import type { Translator } from "@/lib/i18n/types";
-import { canSendToDevice } from "@/lib/platform";
-import { sendConfig } from "@/lib/send";
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  type ContextMenuPosition,
+} from "@/components/ContextMenu";
+import { deviceSummary, type Device } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,6 +42,10 @@ interface SidebarProps {
   onNavigate: (to: Section) => void;
   /** Opens Settings on the Devices page, from the export card. */
   onOpenDevices: () => void;
+  devices: Device[];
+  defaultDevice: Device | null;
+  /** Make another device the default, from the export card. */
+  onDefaultDevice: (id: string) => void;
   updateStage: UpdateStage;
   /** Queued and running tasks — the badge on Tasks. */
   activeTasks: number;
@@ -62,6 +79,9 @@ export function Sidebar({
   active,
   onNavigate,
   onOpenDevices,
+  devices,
+  defaultDevice,
+  onDefaultDevice,
   updateStage,
   activeTasks,
   variant = "rail",
@@ -146,7 +166,12 @@ export function Sidebar({
         onClick={() => onNavigate("settings")}
         pip={updatePip}
       />
-      {canSendToDevice && <DeviceCard onClick={onOpenDevices} />}
+      <DeviceCard
+        devices={devices}
+        current={defaultDevice}
+        onPick={onDefaultDevice}
+        onOpenDevices={onOpenDevices}
+      />
     </nav>
   );
 }
@@ -191,37 +216,89 @@ function Item({
 /**
  * Where a built volume goes by default — the design's "Export to" card.
  *
- * There is one device today, the Kindle address mail is sent to; the card
- * names it, or invites setting it up, and opens Devices either way.
+ * Names the default device and what it is ("E-mail · 1072 × 1448"); the
+ * chevron switches the default without a trip to Settings, which is the one
+ * thing someone with two readers does often. With no device it invites
+ * adding one.
  */
-function DeviceCard({ onClick }: { onClick: () => void }) {
+function DeviceCard({
+  devices,
+  current,
+  onPick,
+  onOpenDevices,
+}: {
+  devices: Device[];
+  current: Device | null;
+  onPick: (id: string) => void;
+  onOpenDevices: () => void;
+}) {
   const t = useT();
-  const [email, setEmail] = useState<string | null>(null);
+  const [menu, setMenu] = useState<ContextMenuPosition | null>(null);
 
-  useEffect(() => {
-    sendConfig()
-      .then((status) => setEmail(status.config.kindle_email.trim() || ""))
-      .catch(() => setEmail(""));
-  }, []);
-
-  if (email === null) return null;
-  return (
-    <button
-      onClick={onClick}
-      className="flex flex-col gap-1.5 rounded-xl bg-ink-raised p-3 text-left max-lg:hidden"
-    >
-      <span className="font-mono text-[11px] font-medium uppercase leading-[14px] tracking-[0.06em]">
-        {t("sidebar.exportTo")}
-      </span>
-      <span className="flex w-full items-center gap-1.5 text-xs font-medium text-on-ink">
-        <span className="min-w-0 flex-1 truncate">
-          {email ? t("sidebar.kindle") : t("sidebar.noDevice")}
+  if (!current) {
+    return (
+      <button
+        onClick={onOpenDevices}
+        className="flex flex-col gap-1.5 rounded-xl bg-ink-raised p-3 text-left max-lg:hidden"
+      >
+        <span className="font-mono text-[11px] font-medium uppercase leading-[14px] tracking-[0.06em]">
+          {t("sidebar.exportTo")}
         </span>
-        <ChevronRight className="size-3.5 shrink-0" />
-      </span>
-      <span className="truncate text-xs" title={email || undefined}>
-        {email ? t("sidebar.byEmail", { email }) : t("sidebar.setUpDevice")}
-      </span>
-    </button>
+        <span className="flex w-full items-center gap-1.5 text-xs font-medium text-on-ink">
+          <span className="min-w-0 flex-1 truncate">{t("sidebar.noDevice")}</span>
+          <ChevronRight className="size-3.5 shrink-0" />
+        </span>
+        <span className="truncate text-xs">{t("sidebar.setUpDevice")}</span>
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.left, y: r.top - 8 - (devices.length + 1) * 36 });
+        }}
+        aria-haspopup="menu"
+        className="flex flex-col gap-1.5 rounded-xl bg-ink-raised p-3 text-left transition-colors hover:bg-ink-raised/80 max-lg:hidden"
+      >
+        <span className="font-mono text-[11px] font-medium uppercase leading-[14px] tracking-[0.06em]">
+          {t("sidebar.exportTo")}
+        </span>
+        <span className="flex w-full items-center gap-1.5 text-xs font-medium text-on-ink">
+          <span className="min-w-0 flex-1 truncate">{current.name}</span>
+          <ChevronDown className="size-3.5 shrink-0" />
+        </span>
+        <span className="truncate text-xs">{deviceSummary(t, current, false)}</span>
+      </button>
+      {menu && (
+        <ContextMenu at={menu} onClose={() => setMenu(null)}>
+          {devices.map((d) => (
+            <ContextMenuItem
+              key={d.id}
+              onSelect={() => {
+                setMenu(null);
+                if (d.id !== current.id) onPick(d.id);
+              }}
+            >
+              <span className="flex w-full items-center gap-2">
+                <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                {d.id === current.id && <Check className="size-3.5 shrink-0" />}
+              </span>
+            </ContextMenuItem>
+          ))}
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onSelect={() => {
+              setMenu(null);
+              onOpenDevices();
+            }}
+          >
+            {t("sidebar.manageDevices")}
+          </ContextMenuItem>
+        </ContextMenu>
+      )}
+    </>
   );
 }

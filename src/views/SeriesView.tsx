@@ -19,6 +19,7 @@ import {
   X,
   ExternalLink,
   Cloud,
+  Plus,
 } from "lucide-react";
 
 import { BatchDownloadDialog } from "@/components/BatchDownloadDialog";
@@ -63,9 +64,7 @@ import {
   type Format,
   type Volume,
 } from "@/lib/api";
-import {
-  buildLibraryVolumes,
-} from "@/lib/settings";
+import { buildLibraryVolumes, type Device } from "@/lib/settings";
 import {
   canFetchDirectly,
   downloadChapterFromSource,
@@ -108,8 +107,11 @@ interface SeriesViewProps {
   onBack: () => void;
   /** Hand a built volume to the editor. */
   onEditVolume: (volume: Volume, source: { seriesId: number; number: string }) => void;
-  /** From settings; what a batch build writes. */
-  defaultFormat: string;
+  /** The user's readers; builds use the default one unless another is picked. */
+  devices: Device[];
+  defaultDevice: Device | null;
+  /** Settings → Devices, for the send button when there is no device yet. */
+  onOpenDevices: () => void;
   /** Open a downloaded chapter in the reader. */
   /**
    * Open a chapter, however it can be reached.
@@ -138,12 +140,17 @@ export function SeriesView({
   onSelectedVolumeChange,
   onBack,
   onEditVolume,
-  defaultFormat,
+  devices,
+  defaultDevice,
+  onOpenDevices,
   onRead,
   onError,
   onTasksChanged,
 }: SeriesViewProps) {
   const t = useT();
+  // What a build writes when nothing more specific is asked: the default
+  // device's format. EPUB with no device, as before there were devices.
+  const defaultFormat = defaultDevice?.format ?? "epub";
   const [series, setSeries] = useState<Series | null>(null);
   const [volumes, setVolumes] = useState<VolumeStatus[] | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -501,7 +508,10 @@ export function SeriesView({
    * panel stays usable while they run.
    */
   const buildOne = useCallback(
-    async (number: string, how: "send" | "build" | "build-as") => {
+    async (number: string, how: "send" | "build" | "build-as", deviceId?: string) => {
+      // Another device is a different build, not just a different address:
+      // its own format, page size and spreads.
+      const device = devices.find((d) => d.id === deviceId) ?? defaultDevice;
       let outDir: string | null = null;
       if (how === "build-as") {
         const folder = await openDialog({ directory: true, multiple: false });
@@ -513,22 +523,23 @@ export function SeriesView({
         await buildLibraryVolumes({
           id: seriesId,
           volumes: [number],
-          format: defaultFormat as Format,
+          format: (device?.format ?? "epub") as Format,
           outDir,
           deliver: how === "send",
+          device: device?.id ?? null,
         });
         onTasksChanged();
       } catch (e) {
         onError(String(e));
       }
     },
-    [seriesId, defaultFormat, onError, onTasksChanged],
+    [seriesId, devices, defaultDevice, onError, onTasksChanged],
   );
 
   // "Protect before acting": building a volume with chapters missing asks
   // first, and offers to fetch them instead (Figma 09 · Volume incompleto).
   const [confirming, setConfirming] = useState<
-    { volume: VolumeStatus; how: "send" | "build" | "build-as" } | null
+    { volume: VolumeStatus; how: "send" | "build" | "build-as"; device?: string } | null
   >(null);
   const [more, setMore] = useState<ContextMenuPosition | null>(null);
 
@@ -714,10 +725,13 @@ export function SeriesView({
             building={building === detail.number}
             onClose={() => onSelectedVolumeChange(null)}
             onBuild={() => (detail.built ? setRebuild(detail) : void edit(detail.number))}
-            onDeliver={(how) =>
+            device={defaultDevice}
+            otherDevices={devices.filter((d) => d.id !== defaultDevice?.id)}
+            onOpenDevices={onOpenDevices}
+            onDeliver={(how, device) =>
               isComplete(detail)
-                ? void buildOne(detail.number, how)
-                : setConfirming({ volume: detail, how })
+                ? void buildOne(detail.number, how, device)
+                : setConfirming({ volume: detail, how, device })
             }
             onShare={() =>
               detail.built &&
@@ -800,7 +814,7 @@ export function SeriesView({
               onClick={() => {
                 const target = confirming;
                 setConfirming(null);
-                if (target) void buildOne(target.volume.number, target.how);
+                if (target) void buildOne(target.volume.number, target.how, target.device);
               }}
             >
               {t("seriesView.buildAnyway")}
@@ -1178,6 +1192,9 @@ function VolumePanel({
   onClose,
   onBuild,
   onDeliver,
+  device,
+  otherDevices,
+  onOpenDevices,
   onGet,
   onRead,
   onFetchDirect,
@@ -1198,8 +1215,14 @@ function VolumePanel({
   onClose: () => void;
   /** Open it in the editor. */
   onBuild: () => void;
-  /** Queue a build: mailed to the device, to the build folder, or somewhere picked. */
-  onDeliver: (how: "send" | "build" | "build-as") => void;
+  /** Queue a build: sent to a device (the default unless named), to the
+   * build folder, or somewhere picked. */
+  onDeliver: (how: "send" | "build" | "build-as", device?: string) => void;
+  /** Where "Send" goes, named on the button. `null` until one is added. */
+  device: Device | null;
+  /** The rest, offered behind the chevron. */
+  otherDevices: Device[];
+  onOpenDevices: () => void;
   onGet: (chapter: string) => void;
   onRead: (chapter: ChapterStatus) => void;
   onFetchDirect: (chapter: string) => void;
@@ -1366,16 +1389,23 @@ function VolumePanel({
               </Button>
             )}
 
-            {canSendToDevice ? (
+            {canSendToDevice && !device ? (
+              // Principle 1 still holds with no device: the main action is
+              // setting one up, not a send that can only fail.
+              <Button variant="deliver" className="h-11 w-full" onClick={onOpenDevices}>
+                <Plus />
+                {t("seriesView.addDevice")}
+              </Button>
+            ) : canSendToDevice && device ? (
               <div className="flex">
                 <Button
                   variant="deliver"
-                  className="h-11 flex-1 rounded-r-none"
+                  className="h-11 min-w-0 flex-1 rounded-r-none"
                   disabled={have === 0 || building}
                   onClick={() => onDeliver("send")}
                 >
                   {building ? <Loader2 className="animate-spin" /> : <Send />}
-                  {t("seriesView.sendToKindle")}
+                  <span className="truncate">{t("seriesView.sendTo", { name: device.name })}</span>
                 </Button>
                 <Button
                   variant="deliver"
@@ -1384,7 +1414,10 @@ function VolumePanel({
                   disabled={have === 0 || building}
                   onClick={(e) => {
                     const r = e.currentTarget.getBoundingClientRect();
-                    setOptions({ x: r.right - 220, y: r.top - 4 - 132 });
+                    setOptions({
+                      x: r.right - 240,
+                      y: r.top - 4 - 132 - otherDevices.length * 36,
+                    });
                   }}
                 >
                   <ChevronDown />
@@ -1413,6 +1446,17 @@ function VolumePanel({
 
       {options && (
         <ContextMenu at={options} onClose={() => setOptions(null)}>
+          {otherDevices.map((other) => (
+            <ContextMenuItem
+              key={other.id}
+              onSelect={() => {
+                setOptions(null);
+                onDeliver("send", other.id);
+              }}
+            >
+              {t("seriesView.sendTo", { name: other.name })}
+            </ContextMenuItem>
+          ))}
           <ContextMenuItem
             onSelect={() => {
               setOptions(null);

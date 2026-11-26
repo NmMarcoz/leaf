@@ -29,7 +29,12 @@ import { WelcomeView } from "@/views/WelcomeView";
 import { useUpdater } from "@/hooks/useUpdater";
 import { scanFolder, type Volume } from "@/lib/api";
 import { unseenChangelog, type ChangelogEntry } from "@/lib/changelog";
-import { getSettings, setSettings as saveSettings, type Settings } from "@/lib/settings";
+import {
+  defaultDevice,
+  getSettings,
+  setSettings as saveSettings,
+  type Settings,
+} from "@/lib/settings";
 import { isMobile } from "@/lib/platform";
 import { recordBuilt, librarySetVolumeCover } from "@/lib/library";
 import { clearThumbnails } from "@/lib/thumbs";
@@ -360,7 +365,9 @@ export default function App() {
             setVolume(built);
             setView({ kind: "editor", from: source });
           }}
-          defaultFormat={settings.default_format}
+          devices={settings.devices}
+          defaultDevice={defaultDevice(settings)}
+          onOpenDevices={() => setView({ kind: "settings", page: "devices" })}
           onError={setError}
           // The sidebar's badge says a task started; the work runs on while
           // the user carries on here.
@@ -415,7 +422,7 @@ export default function App() {
               }
             : undefined
         }
-        defaultFormat={settings.default_format}
+        defaultFormat={defaultDevice(settings)?.format ?? "epub"}
         onError={setError}
       />
     );
@@ -442,6 +449,14 @@ export default function App() {
               setView(to === "settings" ? { kind: "settings", page: "general" } : { kind: to })
             }
             onOpenDevices={() => setView({ kind: "settings", page: "devices" })}
+            devices={settings?.devices ?? []}
+            defaultDevice={defaultDevice(settings)}
+            onDefaultDevice={(id) =>
+              settings &&
+              void saveSettings({ ...settings, default_device: id })
+                .then(setSettings)
+                .catch((e) => setError(String(e)))
+            }
             updateStage={updater.state.stage}
             activeTasks={active}
             variant={isMobile ? "bar" : "rail"}
