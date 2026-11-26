@@ -15,6 +15,13 @@ const dict: PartialDictionary = {
     "readerView.pageLoadFailed": "This page could not be opened.",
     "readerView.rateLimited": "The source may be rate limiting; try again in a moment.",
     "readerView.zoomReset": "Reset zoom",
+    "readerView.upNext": "Up next",
+    "readerView.lastChapter": "That is the last chapter there is.",
+    "readerView.continue": "Continue",
+    "readerView.continueHint": "Press Space or {arrow} to continue.",
+    "readerView.previousPage": "Previous page",
+    "readerView.nextPage": "Next page",
+    "readerView.pageSlider": "Page",
   },
   "pt-BR": {
     "readerView.openingChapter": "Abrindo capítulo",
@@ -30,6 +37,13 @@ const dict: PartialDictionary = {
     "readerView.pageLoadFailed": "Esta página não pôde ser aberta.",
     "readerView.rateLimited": "A fonte pode estar limitando as requisições; tente novamente em instantes.",
     "readerView.zoomReset": "Redefinir zoom",
+    "readerView.upNext": "A seguir",
+    "readerView.lastChapter": "Este é o último capítulo que existe.",
+    "readerView.continue": "Continuar",
+    "readerView.continueHint": "Aperte Espaço ou {arrow} para continuar.",
+    "readerView.previousPage": "Página anterior",
+    "readerView.nextPage": "Próxima página",
+    "readerView.pageSlider": "Página",
   },
 };
 

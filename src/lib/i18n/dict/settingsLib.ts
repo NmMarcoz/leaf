@@ -4,6 +4,14 @@ import type { PartialDictionary } from "@/lib/i18n/types";
  * own dict since it lives outside any component. */
 const dict: PartialDictionary = {
   en: {
+    "settings.deviceKind.kindle": "Kindle",
+    "settings.deviceKind.kobo": "Kobo",
+    "settings.deviceKind.boox": "Boox",
+    "settings.deviceKind.other": "Other reader",
+    "settings.deliveryEmailShort": "email",
+    "settings.deliveryFolderShort": "folder",
+    "settings.deliveryUsbShort": "USB",
+    "settings.resolutionOriginal": "original size",
     "settings.compressionOriginal": "Original",
     "settings.compressionOriginalDetail":
       "Pages are copied untouched. Largest files, and usually far more detail than any e-reader can show.",
@@ -21,6 +29,14 @@ const dict: PartialDictionary = {
       "Your own size and quality — for a device none of the presets fit, or to trade file size against sharpness yourself.",
   },
   "pt-BR": {
+    "settings.deviceKind.kindle": "Kindle",
+    "settings.deviceKind.kobo": "Kobo",
+    "settings.deviceKind.boox": "Boox",
+    "settings.deviceKind.other": "Outro leitor",
+    "settings.deliveryEmailShort": "e-mail",
+    "settings.deliveryFolderShort": "pasta",
+    "settings.deliveryUsbShort": "USB",
+    "settings.resolutionOriginal": "tamanho original",
     "settings.compressionOriginal": "Original",
     "settings.compressionOriginalDetail":
       "As páginas são copiadas sem alteração. Arquivos maiores, e geralmente com mais detalhe do que qualquer e-reader consegue mostrar.",

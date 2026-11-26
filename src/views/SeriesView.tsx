@@ -3,8 +3,9 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeft,
   BookOpen,
-  Check,
   ChevronDown,
+  MoreHorizontal,
+  Send,
   CircleCheck,
   CircleDashed,
   Download,
@@ -14,12 +15,11 @@ import {
   PenLine,
   Pin,
   RefreshCw,
-  Sparkles,
   Trash2,
   X,
-  PackageCheck,
   ExternalLink,
   Cloud,
+  Plus,
 } from "lucide-react";
 
 import { BatchDownloadDialog } from "@/components/BatchDownloadDialog";
@@ -58,15 +58,13 @@ import type { Translator } from "@/lib/i18n/types";
 import {
   languageName,
   deliverBuilt,
-  DELIVER_LABEL,
+  deliverLabel,
   type MetaSource,
   formatBytes,
   type Format,
   type Volume,
 } from "@/lib/api";
-import {
-  buildLibraryVolumes,
-} from "@/lib/settings";
+import { buildLibraryVolumes, type Device } from "@/lib/settings";
 import {
   canFetchDirectly,
   downloadChapterFromSource,
@@ -99,7 +97,7 @@ import {
   seriesHistory,
   type HistoryEntry,
 } from "@/lib/reader";
-import { isMobile } from "@/lib/platform";
+import { canSendToDevice, isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 interface SeriesViewProps {
@@ -109,8 +107,11 @@ interface SeriesViewProps {
   onBack: () => void;
   /** Hand a built volume to the editor. */
   onEditVolume: (volume: Volume, source: { seriesId: number; number: string }) => void;
-  /** From settings; what a batch build writes. */
-  defaultFormat: string;
+  /** The user's readers; builds use the default one unless another is picked. */
+  devices: Device[];
+  defaultDevice: Device | null;
+  /** Settings → Devices, for the send button when there is no device yet. */
+  onOpenDevices: () => void;
   /** Open a downloaded chapter in the reader. */
   /**
    * Open a chapter, however it can be reached.
@@ -139,12 +140,17 @@ export function SeriesView({
   onSelectedVolumeChange,
   onBack,
   onEditVolume,
-  defaultFormat,
+  devices,
+  defaultDevice,
+  onOpenDevices,
   onRead,
   onError,
   onTasksChanged,
 }: SeriesViewProps) {
   const t = useT();
+  // What a build writes when nothing more specific is asked: the default
+  // device's format. EPUB with no device, as before there were devices.
+  const defaultFormat = defaultDevice?.format ?? "epub";
   const [series, setSeries] = useState<Series | null>(null);
   const [volumes, setVolumes] = useState<VolumeStatus[] | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -495,6 +501,49 @@ export function SeriesView({
   }, [order, picked, buildable, seriesId, defaultFormat, onError, onTasksChanged]);
 
   /**
+   * The volume panel's main actions, for the one volume showing.
+   *
+   * `send` builds and mails it as one queued job; otherwise it is built to the
+   * build folder (or wherever the user picks). Both go on the queue, so the
+   * panel stays usable while they run.
+   */
+  const buildOne = useCallback(
+    async (number: string, how: "send" | "build" | "build-as", deviceId?: string) => {
+      // Another device is a different build, not just a different address:
+      // its own format, page size and spreads.
+      const device = devices.find((d) => d.id === deviceId) ?? defaultDevice;
+      let outDir: string | null = null;
+      if (how === "build-as") {
+        const folder = await openDialog({ directory: true, multiple: false });
+        if (typeof folder !== "string") return;
+        outDir = folder;
+      }
+      onError(null);
+      try {
+        await buildLibraryVolumes({
+          id: seriesId,
+          volumes: [number],
+          format: (device?.format ?? "epub") as Format,
+          outDir,
+          deliver: how === "send",
+          device: device?.id ?? null,
+        });
+        onTasksChanged();
+      } catch (e) {
+        onError(String(e));
+      }
+    },
+    [seriesId, devices, defaultDevice, onError, onTasksChanged],
+  );
+
+  // "Protect before acting": building a volume with chapters missing asks
+  // first, and offers to fetch them instead (Figma 09 · Volume incompleto).
+  const [confirming, setConfirming] = useState<
+    { volume: VolumeStatus; how: "send" | "build" | "build-as"; device?: string } | null
+  >(null);
+  const [more, setMore] = useState<ContextMenuPosition | null>(null);
+
+  /**
    * How to open a chapter of this series.
    *
    * Downloaded pages come off disk. Anything else the source indexed is
@@ -531,92 +580,65 @@ export function SeriesView({
 
   const pickedBuildable = order.filter((n) => picked.has(n) && buildable.has(n));
 
+  const builtCount = (volumes ?? []).filter((v) => v.built).length;
+  const readyCount = (volumes ?? []).filter(
+    (v) => !v.built && v.number !== UNSORTED && isComplete(v),
+  ).length;
+  const chapterTotal = (volumes ?? []).reduce((n, v) => n + v.chapters.length, 0);
+  const publishedCount = (volumes ?? []).filter((v) => v.number !== UNSORTED).length;
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-card/60 px-4 py-2.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            // On mobile, closing the volume panel comes before leaving the series.
-            if (isMobile && selectedVolume) {
-              onSelectedVolumeChange(null);
-            } else {
-              onBack();
-            }
-          }}
-        >
-          <ArrowLeft />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold">{series?.title ?? "…"}</h1>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {series
-              ? t("seriesView.headerSubtitle", {
-                  author: series.author || t("seriesView.unknownAuthor"),
-                  have: series.have_chapters,
-                  known: series.known_chapters || "?",
-                })
-              : ""}
-          </p>
-        </div>
+    <div className="relative flex h-full min-h-0">
+      <main
+        className="scrollbar-thin min-w-0 flex-1 overflow-y-auto"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setPicked(new Set());
+        }}
+      >
+        <div className="mx-auto flex max-w-[880px] flex-col gap-7 px-5 pb-10 pt-5 sm:px-8 sm:pt-8">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              className="-ml-3"
+              onClick={() => {
+                // On mobile, closing the volume panel comes before leaving the series.
+                if (isMobile && selectedVolume) onSelectedVolumeChange(null);
+                else onBack();
+              }}
+            >
+              <ArrowLeft />
+              {t("seriesView.backToShelf")}
+            </Button>
+            <div className="flex-1" />
+            {missing.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setRouting({ at: { x: r.left, y: r.bottom + 4 }, wanted: missing });
+                }}
+                title={t("seriesView.findMissingHint", { count: missing.length })}
+              >
+                <Download />
+                {t("seriesView.getMissing", { count: missing.length })}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={t("seriesView.more")}
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setMore({ x: r.right - 220, y: r.bottom + 4 });
+              }}
+            >
+              {syncing || refetching ? <Loader2 className="animate-spin" /> : <MoreHorizontal />}
+            </Button>
+          </div>
 
-        <Button
-          variant={missing.length > 0 ? "default" : "outline"}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            setRouting({ at: { x: r.left, y: r.bottom + 4 }, wanted: missing });
-          }}
-          disabled={missing.length === 0}
-          title={
-            missing.length === 0
-              ? t("seriesView.nothingMissing")
-              : t("seriesView.findMissingHint", { count: missing.length })
-          }
-        >
-          <Layers />
-          {t("seriesView.getMissing", { count: missing.length > 0 ? missing.length : "" })}
-        </Button>
-
-        <Hint label={t("seriesView.rePullHint")}>
-          <Button variant="ghost" size="icon" onClick={() => void sync()} disabled={syncing}>
-            {syncing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          </Button>
-        </Hint>
-        <Hint label={t("seriesView.refetchHint")}>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => void refetchMetadata()}
-            disabled={refetching || !series?.source}
-          >
-            {refetching ? <Loader2 className="animate-spin" /> : <Sparkles />}
-          </Button>
-        </Hint>
-        <Hint label={t("seriesView.removeSeriesHint")}>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setRemoving(true)}
-            disabled={!series}
-          >
-            <Trash2 />
-          </Button>
-        </Hint>
-      </header>
-
-      {/* `relative` so the volume panel has something to cover when it is an
-          overlay rather than a column. */}
-      <div className="relative flex min-h-0 flex-1">
-        <main
-          className="scrollbar-thin min-w-0 flex-1 overflow-y-auto p-5"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setPicked(new Set());
-          }}
-        >
-          {/* The same things the discover dialog shows, above the shelf rather
-              than in a dialog: this page is where a series in the library is
-              looked at, and it had nothing to say about the series itself. */}
+          {/* The same things the discover dialog shows, above the volumes
+              rather than in a dialog: this page is where a series in the
+              library is looked at. */}
           {series && (
             <SeriesDetails
               series={series}
@@ -643,20 +665,41 @@ export function SeriesView({
             />
           )}
 
+          {volumes !== null && volumes.length > 0 && (
+            <div className="grid grid-cols-3 gap-3 max-sm:gap-2">
+              <StatCard tone="info" label={t("seriesView.statBuilt")} value={builtCount} />
+              <StatCard tone="ink" label={t("seriesView.statReady")} value={readyCount} />
+              <StatCard tone="warning" label={t("seriesView.statMissing")} value={missing.length} />
+            </div>
+          )}
+
+          <section className="flex flex-col gap-4">
+            <div className="flex items-baseline gap-4">
+              <h2 className="type-subtitle flex-1">{t("seriesView.volumes")}</h2>
+              {volumes !== null && volumes.length > 0 && (
+                <span className="text-xs text-text-secondary">
+                  {t("seriesView.publishedSummary", {
+                    volumes: publishedCount,
+                    chapters: chapterTotal,
+                  })}
+                </span>
+              )}
+            </div>
+
           {volumes === null ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" /> {t("seriesView.loadingVolumes")}
+            <div className="flex items-center gap-2 text-sm text-text-secondary">
+              <Loader2 className="size-4 animate-spin" /> {t("seriesView.loadingVolumes")}
             </div>
           ) : volumes.length === 0 ? (
-            <div className="mx-auto mt-16 max-w-md text-center">
-              <BookOpen className="mx-auto size-8 text-muted-foreground" />
-              <h2 className="mt-3 text-sm font-medium">{t("seriesView.noVolumeLayoutTitle")}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-line-strong px-6 py-12 text-center">
+              <BookOpen className="mx-auto size-7 text-text-tertiary" />
+              <h3 className="mt-3 type-heading">{t("seriesView.noVolumeLayoutTitle")}</h3>
+              <p className="mt-1 text-sm text-text-secondary">
                 {t("seriesView.noVolumeLayoutDescription")}
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-x-3 gap-y-5">
               {volumes.map((volume) => (
                 <VolumeCard
                   key={volume.number}
@@ -671,14 +714,25 @@ export function SeriesView({
               ))}
             </div>
           )}
-        </main>
+          </section>
+        </div>
+      </main>
 
         {detail && (
           <VolumePanel
             volume={detail}
+            pageCount={detail.chapters.reduce((n, c) => n + (c.folder ? c.page_count : 0), 0)}
             building={building === detail.number}
             onClose={() => onSelectedVolumeChange(null)}
             onBuild={() => (detail.built ? setRebuild(detail) : void edit(detail.number))}
+            device={defaultDevice}
+            otherDevices={devices.filter((d) => d.id !== defaultDevice?.id)}
+            onOpenDevices={onOpenDevices}
+            onDeliver={(how, device) =>
+              isComplete(detail)
+                ? void buildOne(detail.number, how, device)
+                : setConfirming({ volume: detail, how, device })
+            }
             onShare={() =>
               detail.built &&
               void deliverBuilt(detail.built.path, volumeLabel(detail)).catch((e) =>
@@ -703,7 +757,86 @@ export function SeriesView({
             onResetToSource={(chapter) => void resetToSource([chapter])}
           />
         )}
-      </div>
+
+      {more && (
+        <ContextMenu at={more} onClose={() => setMore(null)}>
+          <ContextMenuItem
+            onSelect={() => {
+              setMore(null);
+              void sync();
+            }}
+            disabled={syncing}
+          >
+            {t("seriesView.rePullHint")}
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              setMore(null);
+              void refetchMetadata();
+            }}
+            disabled={refetching || !series?.source}
+          >
+            {t("seriesView.refetchHint")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onSelect={() => {
+              setMore(null);
+              setRemoving(true);
+            }}
+            disabled={!series}
+          >
+            {t("seriesView.removeSeriesHint")}
+          </ContextMenuItem>
+        </ContextMenu>
+      )}
+
+      <Dialog open={confirming !== null} onOpenChange={(next) => !next && setConfirming(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {t("seriesView.incompleteTitle", {
+                label: confirming ? volumeLabel(confirming.volume) : "",
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {confirming &&
+                t("seriesView.incompleteDescription", {
+                  have: downloadedCount(confirming.volume),
+                  total: confirming.volume.chapters.length,
+                  missing: summariseRuns(missingChapters(confirming.volume).map((c) => c.number)),
+                })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                const target = confirming;
+                setConfirming(null);
+                if (target) void buildOne(target.volume.number, target.how, target.device);
+              }}
+            >
+              {t("seriesView.buildAnyway")}
+            </Button>
+            <Button
+              onClick={(e) => {
+                const target = confirming;
+                setConfirming(null);
+                if (!target) return;
+                const r = e.currentTarget.getBoundingClientRect();
+                setRouting({
+                  at: { x: r.left, y: r.bottom + 4 },
+                  wanted: missingChapters(target.volume).map((c) => c.number),
+                });
+              }}
+            >
+              <Download />
+              {t("seriesView.getMissingFirst")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {menu && (
         <ContextMenu at={menu} onClose={() => setMenu(null)}>
@@ -861,7 +994,7 @@ export function SeriesView({
                 }
               }}
             >
-              {DELIVER_LABEL}
+              {deliverLabel(t)}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -903,7 +1036,36 @@ export function SeriesView({
   );
 }
 
-/** One volume on the shelf: its art, how much of it we hold, and a way in. */
+/** One of the three counts under the hero: built, ready, missing. */
+function StatCard({
+  tone,
+  label,
+  value,
+}: {
+  tone: "info" | "ink" | "warning";
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border border-line bg-raised px-4 py-3 max-sm:px-3">
+      <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            tone === "info" ? "bg-info" : tone === "warning" ? "bg-warning" : "bg-strong",
+          )}
+        />
+        <span className="truncate">{label}</span>
+      </span>
+      <span className="type-title">{value}</span>
+    </div>
+  );
+}
+
+/**
+ * One volume on the shelf: its art and where it stands, as the design's status
+ * chip — missing (with how many it has), complete, or built.
+ */
 function VolumeCard({
   volume,
   open,
@@ -927,55 +1089,39 @@ function VolumeCard({
   const have = downloadedCount(volume);
   const complete = isComplete(volume);
   const total = volume.chapters.length;
+  const label =
+    volume.number === UNSORTED ? t("seriesView.unsorted") : t("seriesView.volShort", { number: volume.number });
 
   return (
     <div
       onContextMenu={onContextMenu}
       className={cn(
-        "group relative overflow-hidden rounded-lg border bg-card transition-colors",
-        picked
-          ? "border-primary ring-2 ring-primary/40"
-          : open
-            ? "border-primary"
-            : "border-border hover:border-muted-foreground/40",
+        "group relative rounded-xl p-1.5 transition-colors",
+        open || picked ? "ring-2 ring-strong" : "hover:bg-hover",
       )}
     >
-      <button onClick={onPick} className="flex w-full flex-col text-left">
+      <button onClick={onPick} className="flex w-full flex-col gap-2 text-left">
         <VolumeArt volume={volume} dimmed={have === 0} />
-
-        <div className="flex flex-col gap-1.5 px-3 pb-3 pt-2.5">
-          <p className="truncate text-xs font-medium">{volumeLabel(volume)}</p>
-          <div className="flex items-center gap-1.5">
-            {complete ? (
-              <Badge>
-                <Check className="size-2.5" />
-                {t("seriesView.complete")}
-              </Badge>
-            ) : (
-              <Badge variant="outline">
-                {have}/{total || "?"}
-              </Badge>
-            )}
-            {/* Written out already, and the file is still where it was put. */}
-            {volume.built && (
-              <Badge variant="outline" title={volume.built.path}>
-                <PackageCheck className="size-2.5" />
-                {t("seriesView.built")}
-              </Badge>
-            )}
-          </div>
-        </div>
+        <span className="flex flex-col items-start gap-1.5 px-0.5">
+          <span className="truncate text-[13px] font-medium">{label}</span>
+          {volume.built ? (
+            <Badge variant="info" title={volume.built.path}>
+              <Dot />
+              {t("seriesView.built")}
+            </Badge>
+          ) : complete ? (
+            <Badge variant="secondary">
+              <Dot />
+              {t("seriesView.complete")}
+            </Badge>
+          ) : (
+            <Badge variant="warning">
+              <Dot />
+              {have}/{total || "?"}
+            </Badge>
+          )}
+        </span>
       </button>
-
-      {/* Progress along the bottom edge: readable without parsing the numbers. */}
-      {total > 0 && !complete && (
-        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-muted">
-          <div
-            className="h-full bg-primary/70"
-            style={{ width: `${(have / total) * 100}%` }}
-          />
-        </div>
-      )}
 
       {have > 0 && (
         <button
@@ -986,19 +1132,20 @@ function VolumeCard({
           disabled={building}
           title={t("seriesView.buildTitleFor", { label: volumeLabel(volume) })}
           className={cn(
-            "absolute right-1.5 top-1.5 rounded-md bg-background/85 p-1.5 text-muted-foreground backdrop-blur-sm transition-opacity hover:text-primary focus-visible:opacity-100",
+            "absolute right-3 top-3 rounded-md bg-raised/90 p-1.5 text-text-secondary backdrop-blur-sm transition-opacity hover:text-foreground focus-visible:opacity-100",
             !isMobile && "opacity-0 group-hover:opacity-100",
           )}
         >
-          {building ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <PenLine className="size-3.5" />
-          )}
+          {building ? <Loader2 className="size-3.5 animate-spin" /> : <PenLine className="size-3.5" />}
         </button>
       )}
     </div>
   );
+}
+
+/** The status chip's leading dot, in the chip's own colour. */
+function Dot() {
+  return <span className="size-1.5 rounded-full bg-current" />;
 }
 
 /**
@@ -1013,7 +1160,7 @@ function VolumeArt({ volume, dimmed }: { volume: VolumeStatus; dimmed: boolean }
   return (
     <div
       ref={ref}
-      className="flex aspect-[10/15] w-full items-center justify-center bg-muted/40"
+      className="flex aspect-[2/3] w-full items-center justify-center overflow-hidden rounded-lg bg-sunken ring-1 ring-line/70"
     >
       {volume.cover_path ? (
         url && <img src={url} alt="" className={cn("h-full w-full object-cover", fade)} />
@@ -1025,20 +1172,29 @@ function VolumeArt({ volume, dimmed }: { volume: VolumeStatus; dimmed: boolean }
           imageClassName={fade}
         />
       ) : (
-        <BookOpen className="size-5 text-muted-foreground" />
+        <BookOpen className="size-5 text-text-tertiary" />
       )}
     </div>
   );
 }
 
-/** Progress while a batch builds, then what it produced. */
 
-/** The selected volume's chapters. */
+/**
+ * The selected volume (Figma 07 · Série · volume pronto): where it stands as
+ * two steps — chapters, then the EPUB — its chapters, and the one thing to do
+ * next at the foot. On a desktop that is sending it to the Kindle, in the
+ * delivery colour; building and saving elsewhere sit behind the chevron.
+ */
 function VolumePanel({
   volume,
+  pageCount,
   building,
   onClose,
   onBuild,
+  onDeliver,
+  device,
+  otherDevices,
+  onOpenDevices,
   onGet,
   onRead,
   onFetchDirect,
@@ -1053,9 +1209,20 @@ function VolumePanel({
   onResetToSource,
 }: {
   volume: VolumeStatus;
+  /** Pages on disk across the volume's chapters. */
+  pageCount: number;
   building: boolean;
   onClose: () => void;
+  /** Open it in the editor. */
   onBuild: () => void;
+  /** Queue a build: sent to a device (the default unless named), to the
+   * build folder, or somewhere picked. */
+  onDeliver: (how: "send" | "build" | "build-as", device?: string) => void;
+  /** Where "Send" goes, named on the button. `null` until one is added. */
+  device: Device | null;
+  /** The rest, offered behind the chevron. */
+  otherDevices: Device[];
+  onOpenDevices: () => void;
   onGet: (chapter: string) => void;
   onRead: (chapter: ChapterStatus) => void;
   onFetchDirect: (chapter: string) => void;
@@ -1076,43 +1243,104 @@ function VolumePanel({
   const t = useT();
   const have = downloadedCount(volume);
   const missing = missingChapters(volume);
+  const complete = isComplete(volume);
   const isUnsorted = volume.number === UNSORTED;
+  const [options, setOptions] = useState<ContextMenuPosition | null>(null);
+  const { ref, url } = useThumbnail(volume.cover_path ?? "", 160);
+  const numbers = volume.chapters.map((c) => c.number);
+  const range =
+    numbers.length > 0 ? summariseRuns(numbers) : "";
 
   return (
     <aside
       className={cn(
-        "flex flex-col border-border bg-card/40",
-        // A 384px panel beside a grid leaves a phone's grid nothing, so there
+        "flex flex-col bg-raised",
+        // A 380px panel beside a grid leaves a phone's grid nothing, so there
         // it covers the grid instead of sitting next to it.
-        isMobile
-          ? "absolute inset-0 z-30 border-l-0 bg-background"
-          : "w-96 shrink-0 border-l",
+        isMobile ? "absolute inset-0 z-30" : "w-[380px] shrink-0 border-l border-line",
       )}
     >
-      <div className="flex items-center gap-2 border-b border-border py-3.5 pl-5 pr-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-medium">{volumeLabel(volume)}</h2>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {t("seriesView.volumeChaptersSummary", { have, total: volume.chapters.length })}
-            {missing.length > 0 &&
-              t("seriesView.missingSummary", {
-                summary: summariseRuns(missing.map((c) => c.number)),
-              })}
-          </p>
+      <div className="flex flex-col gap-4 border-b border-line p-5">
+        <div className="flex items-start gap-4">
+          <div
+            ref={ref as React.Ref<HTMLDivElement>}
+            className="flex h-24 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-sunken shadow-sm"
+          >
+            {url ? (
+              <img src={url} alt="" className="size-full object-cover" />
+            ) : volume.cover_url ? (
+              <RemoteImage url={volume.cover_url} max={160} className="size-full" />
+            ) : (
+              <BookOpen className="size-4 text-text-tertiary" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <p className="type-overline">
+              {isUnsorted ? t("seriesView.unsorted") : t("seriesView.volumeOverline", { number: volume.number })}
+            </p>
+            <h2 className="type-subtitle mt-1 truncate">
+              {range ? t("seriesView.chaptersRange", { range }) : volumeLabel(volume)}
+            </h2>
+            <p className="mt-0.5 text-xs text-text-secondary">
+              {t("seriesView.panelSummary", { chapters: volume.chapters.length, pages: pageCount })}
+            </p>
+          </div>
+          {isUnsorted && !organizing && (
+            <Hint label={t("seriesView.organizeHint")}>
+              <Button variant="ghost" size="sm" onClick={onToggleOrganize}>
+                <Layers className="size-3.5" />
+                {t("seriesView.organize")}
+              </Button>
+            </Hint>
+          )}
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("seriesView.close")}>
+            <X />
+          </Button>
         </div>
-        {/* Only where it means something: a real volume's chapters came from
-            the source's own layout, so there's nothing here to sort by hand. */}
-        {isUnsorted && !organizing && (
-          <Hint label={t("seriesView.organizeHint")}>
-            <Button variant="ghost" size="sm" onClick={onToggleOrganize}>
-              <Layers className="size-3.5" />
-              {t("seriesView.organize")}
-            </Button>
-          </Hint>
-        )}
-        <Button variant="ghost" size="icon-sm" onClick={onClose}>
-          <X className="size-3.5" />
-        </Button>
+
+        {/* The volume's two steps, in order. */}
+        <div className="grid grid-cols-2 gap-2">
+          <div
+            className={cn(
+              "flex flex-col gap-0.5 rounded-lg px-3 py-2.5",
+              complete ? "bg-success-soft" : "bg-warning-soft",
+            )}
+          >
+            <span
+              className={cn(
+                "flex items-center gap-1.5 text-xs font-medium",
+                complete ? "text-success" : "text-warning",
+              )}
+            >
+              {complete ? <CircleCheck className="size-3.5" /> : <CircleDashed className="size-3.5" />}
+              {t("seriesView.stepChapters")}
+            </span>
+            <span className="text-xs text-text-secondary">
+              {t("seriesView.stepChaptersDetail", { have, total: volume.chapters.length })}
+            </span>
+          </div>
+          <div
+            className={cn(
+              "flex flex-col gap-0.5 rounded-lg px-3 py-2.5",
+              volume.built ? "bg-info-soft" : "bg-sunken",
+            )}
+          >
+            <span
+              className={cn(
+                "flex items-center gap-1.5 text-xs font-medium",
+                volume.built ? "text-info" : "text-text-secondary",
+              )}
+            >
+              {volume.built ? <CircleCheck className="size-3.5" /> : <CircleDashed className="size-3.5" />}
+              EPUB
+            </span>
+            <span className="truncate text-xs text-text-secondary" title={volume.built?.path}>
+              {volume.built
+                ? t("seriesView.builtSize", { size: formatBytes(volume.built.bytes) })
+                : t("seriesView.notBuilt")}
+            </span>
+          </div>
+        </div>
       </div>
 
       {organizing ? (
@@ -1124,8 +1352,9 @@ function VolumePanel({
       ) : (
         <>
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+            <p className="type-overline px-5 pb-1 pt-4">{t("seriesView.chaptersOverline")}</p>
             {volume.chapters.length === 0 ? (
-              <p className="px-5 py-4 text-[11px] text-muted-foreground">
+              <p className="px-5 py-4 text-xs text-text-secondary">
                 {t("seriesView.noChaptersListed")}
               </p>
             ) : (
@@ -1145,24 +1374,7 @@ function VolumePanel({
             )}
           </div>
 
-          <div className="flex flex-col gap-2 border-t border-border p-4">
-            {/* Offered without having to build again: the work is already done, and
-                on a phone this is the only way a volume leaves the app at all. */}
-            {volume.built && (
-              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
-                <PackageCheck className="size-3.5 shrink-0 text-primary" />
-                <p
-                  className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
-                  title={volume.built.path}
-                >
-                  {t("seriesView.builtSize", { size: formatBytes(volume.built.bytes) })}
-                </p>
-                <Button variant="outline" size="sm" onClick={onShare}>
-                  {DELIVER_LABEL}
-                </Button>
-              </div>
-            )}
-
+          <div className="flex flex-col gap-2.5 border-t border-line p-4">
             {missing.length > 0 && (
               <Button
                 variant="outline"
@@ -1172,17 +1384,114 @@ function VolumePanel({
                   onGetMissing({ x: r.left, y: r.bottom + 4 });
                 }}
               >
-                <Layers />
+                <Download />
                 {t("seriesView.getMissingInVolume", { count: missing.length })}
               </Button>
             )}
 
-            <Button className="w-full" onClick={onBuild} disabled={have === 0 || building}>
-              {building ? <Loader2 className="animate-spin" /> : <PenLine />}
-              {volume.built ? t("seriesView.buildAgain") : t("seriesView.buildThisVolume")}
-            </Button>
+            {canSendToDevice && !device ? (
+              // Principle 1 still holds with no device: the main action is
+              // setting one up, not a send that can only fail.
+              <Button variant="deliver" className="h-11 w-full" onClick={onOpenDevices}>
+                <Plus />
+                {t("seriesView.addDevice")}
+              </Button>
+            ) : canSendToDevice && device ? (
+              <div className="flex">
+                <Button
+                  variant="deliver"
+                  className="h-11 min-w-0 flex-1 rounded-r-none"
+                  disabled={have === 0 || building}
+                  onClick={() => onDeliver("send")}
+                >
+                  {building ? <Loader2 className="animate-spin" /> : <Send />}
+                  <span className="truncate">{t("seriesView.sendTo", { name: device.name })}</span>
+                </Button>
+                <Button
+                  variant="deliver"
+                  className="h-11 w-11 rounded-l-none border-l border-white/25 px-0"
+                  aria-label={t("seriesView.moreWays")}
+                  disabled={have === 0 || building}
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setOptions({
+                      x: r.right - 240,
+                      y: r.top - 4 - 132 - otherDevices.length * 36,
+                    });
+                  }}
+                >
+                  <ChevronDown />
+                </Button>
+              </div>
+            ) : volume.built ? (
+              <div className="flex gap-2">
+                <Button variant="deliver" className="h-11 flex-1" onClick={onShare}>
+                  <Send />
+                  {t("seriesView.shareEpub")}
+                </Button>
+                <Button variant="outline" className="h-11" onClick={onBuild} disabled={building}>
+                  {building ? <Loader2 className="animate-spin" /> : <PenLine />}
+                  {t("seriesView.buildAgain")}
+                </Button>
+              </div>
+            ) : (
+              <Button className="h-11 w-full" onClick={onBuild} disabled={have === 0 || building}>
+                {building ? <Loader2 className="animate-spin" /> : <PenLine />}
+                {t("seriesView.buildThisVolume")}
+              </Button>
+            )}
           </div>
         </>
+      )}
+
+      {options && (
+        <ContextMenu at={options} onClose={() => setOptions(null)}>
+          {otherDevices.map((other) => (
+            <ContextMenuItem
+              key={other.id}
+              onSelect={() => {
+                setOptions(null);
+                onDeliver("send", other.id);
+              }}
+            >
+              {t("seriesView.sendTo", { name: other.name })}
+            </ContextMenuItem>
+          ))}
+          <ContextMenuItem
+            onSelect={() => {
+              setOptions(null);
+              onDeliver("build");
+            }}
+          >
+            {t("seriesView.buildOnly")}
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              setOptions(null);
+              onDeliver("build-as");
+            }}
+          >
+            {t("seriesView.buildAs")}
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              setOptions(null);
+              onBuild();
+            }}
+          >
+            {t("seriesView.editPages")}
+          </ContextMenuItem>
+          {volume.built && (
+            <ContextMenuItem
+              onSelect={() => {
+                setOptions(null);
+                onShare();
+              }}
+            >
+              {t("seriesView.showFile")}
+            </ContextMenuItem>
+          )}
+        </ContextMenu>
       )}
     </aside>
   );
@@ -1268,32 +1577,31 @@ function ChapterRow({
   );
 
   return (
-    <div
-      className={cn(
-        "border-b border-border last:border-b-0",
-        !have && "bg-amber-500/5",
-      )}
-    >
-      <div className="flex items-center gap-3 py-2.5 pl-4 pr-3">
-        {have ? (
-          <CircleCheck className="size-4 shrink-0 text-primary" />
-        ) : (
-          <CircleDashed className="size-4 shrink-0 text-amber-500" />
-        )}
+    <div className="border-b border-line/60 last:border-b-0">
+      <div className="flex items-center gap-3 py-2.5 pl-5 pr-3">
+        <span
+          className={cn(
+            "w-8 shrink-0 font-mono text-xs",
+            have ? "text-text-tertiary" : "text-warning",
+          )}
+        >
+          {chapter.number}
+        </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">
             {t("seriesView.chapterNumber", { number: chapter.number })}
             {chapter.title && (
-              <span className="font-normal text-muted-foreground"> · {chapter.title}</span>
+              <span className="font-normal text-text-secondary"> · {chapter.title}</span>
             )}
           </p>
           <p
             className={cn(
-              "truncate text-[11px]",
-              !have && chapter.unavailable ? "text-amber-500" : "text-muted-foreground",
+              "truncate text-xs",
+              have ? "text-text-secondary" : "text-warning",
             )}
           >
             {detail}
+            {source && ` · ${source}`}
           </p>
         </div>
         {primary}
@@ -1309,17 +1617,17 @@ function ChapterRow({
       </div>
 
       {open && (
-        <div className="flex flex-col gap-3 pb-4 pl-11 pr-4">
+        <div className="flex flex-col gap-3 pb-4 pl-16 pr-4">
           {(source || chapter.source_url) && (
             <div className="flex items-center gap-3 text-[11px]">
-              <span className="w-14 shrink-0 text-muted-foreground">{t("seriesView.sourceLabel")}</span>
+              <span className="w-14 shrink-0 text-text-secondary">{t("seriesView.sourceLabel")}</span>
               <span className="min-w-0 truncate" title={chapter.source_url ?? undefined} data-selectable>
                 {source ?? chapter.source_url}
               </span>
             </div>
           )}
           {!have && (
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
+            <p className="text-xs leading-4 text-text-secondary">
               {chapter.unavailable ? t("seriesView.notHostedHint") : t("seriesView.missingExplainer")}
             </p>
           )}
@@ -1464,105 +1772,104 @@ function SeriesDetails({
     .join(" · ");
 
   return (
-    <div ref={ref as React.Ref<HTMLDivElement>} className={cn("mb-8 flex gap-6", isMobile && "flex-col gap-4")}>
-      <div
-        className={cn(
-          "flex items-center justify-center overflow-hidden rounded-lg bg-muted/40",
-          isMobile ? "h-52 w-36 self-start" : "h-52 w-36 shrink-0",
-        )}
-      >
+    <div ref={ref as React.Ref<HTMLDivElement>} className="flex gap-7 max-sm:flex-col max-sm:gap-5">
+      <div className="flex h-[180px] w-[120px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-sunken shadow-[0_6px_20px_rgb(20_22_27/0.18)]">
         {series.cover_path && url ? (
           <img src={url} alt="" className="h-full w-full object-cover" />
         ) : (
-          <BookOpen className="size-6 text-muted-foreground" />
+          <BookOpen className="size-6 text-text-tertiary" />
         )}
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <div>
-          <h2 className="text-base font-semibold">{series.title}</h2>
-          {subtitle && (
-            <p className="truncate text-[11px] text-muted-foreground">{subtitle}</p>
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground">
-          {[series.author, series.artist !== series.author ? series.artist : null]
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        <p className="type-overline">
+          {[t("seriesView.seriesOverline"), series.status].filter(Boolean).join(" · ")}
+        </p>
+        <h1 className="type-display break-words max-sm:text-[32px] max-sm:leading-9">{series.title}</h1>
+        <p className="text-sm text-text-secondary">
+          {[
+            subtitle,
+            [series.author, series.artist !== series.author ? series.artist : null]
+              .filter(Boolean)
+              .join(" · ") || t("seriesView.unknownAuthor"),
+            series.year,
+          ]
             .filter(Boolean)
-            .join(" · ") || t("seriesView.unknownAuthor")}
-          {series.year ? ` · ${series.year}` : ""}
-          {series.status ? ` · ${series.status}` : ""}
+            .join(" · ")}
         </p>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {series.content_rating && (
-            <Badge variant={series.content_rating === "safe" ? "outline" : "default"}>
-              {series.content_rating}
-            </Badge>
-          )}
-          {series.site_url && (
-            <a
-              href={series.site_url}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+        {series.description && (
+          <div>
+            <p
+              className={cn(
+                "whitespace-pre-line text-sm leading-5 text-text-secondary",
+                !expanded && "line-clamp-2",
+              )}
+              data-selectable
             >
-              <ExternalLink className="size-3.5" />
-              {sourceLabel(series.source, t)}
-            </a>
-          )}
-        </div>
-
-        {series.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {series.tags.map((tag) => (
-              <Badge key={tag} variant="secondary">
-                {tag}
-              </Badge>
-            ))}
+              {series.description}
+            </p>
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-1 text-xs font-medium text-info underline-offset-4 hover:underline"
+            >
+              {expanded ? t("seriesView.showLess") : t("seriesView.showMore")}
+            </button>
           </div>
         )}
 
         {/* The translation decides which chapters exist and how they are
-            numbered, so it belongs next to the chapter list rather than buried
-            in settings. The hint goes underneath: beside the select it was
-            squeezed into a sliver on any window narrower than a monitor. */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
+            numbered, so it sits with the series rather than in settings. */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Select
             value={series.language}
             onValueChange={onLanguage}
             disabled={switching}
             onOpenChange={(isOpen: boolean) => isOpen && onLoadLanguages()}
           >
-            <SelectTrigger className="h-7 w-44 text-xs">
+            <SelectTrigger
+              className="h-8 w-auto gap-1.5 rounded-full px-3 text-xs"
+              title={t("seriesView.translationHint")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(languages && languages.length > 0
-                ? languages
-                : [series.language]
-              ).map((code) => (
+              {(languages && languages.length > 0 ? languages : [series.language]).map((code) => (
                 <SelectItem key={code} value={code}>
-                  {languageName(code)}
+                  {languageName(code, t)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {switching && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-          </div>
-          <span className="text-[11px] text-muted-foreground">
-            {t("seriesView.translationHint")}
-          </span>
+          {switching && <Loader2 className="size-3.5 animate-spin text-text-tertiary" />}
+          {series.site_url && (
+            <a
+              href={series.site_url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex h-8 items-center gap-1.5 rounded-full border border-line-strong bg-raised px-3 text-xs font-medium text-info hover:bg-hover"
+            >
+              <ExternalLink className="size-3.5" />
+              {sourceLabel(series.source, t)}
+            </a>
+          )}
+          {series.content_rating && series.content_rating !== "safe" && (
+            <Badge variant="warning">{series.content_rating}</Badge>
+          )}
+          {series.tags.slice(0, 6).map((tag) => (
+            <Badge key={tag} variant="outline">
+              {tag}
+            </Badge>
+          ))}
         </div>
 
         {/* What this series is to *you*: where to pick it up, and how much of
             it you have been through. */}
         {(resume || readCount > 0) && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3 pt-1">
             {resume && (
-              <Button size="sm" onClick={onResume}>
-                <BookOpen className="size-3.5" />
+              <Button onClick={onResume}>
+                <BookOpen />
                 {resume.opened_at && resume.last_page > 0
                   ? t("seriesView.continueChapter", {
                       number: resume.number,
@@ -1572,43 +1879,20 @@ function SeriesDetails({
               </Button>
             )}
             {readCount > 0 && (
-              <>
-                <span className="text-[11px] text-muted-foreground">
-                  {t(
-                    readCount === 1
-                      ? "seriesView.readHistorySingular"
-                      : "seriesView.readHistoryPlural",
-                    { count: readCount },
-                  )}
-                </span>
+              <span className="text-xs text-text-secondary">
+                {t(
+                  readCount === 1 ? "seriesView.readHistorySingular" : "seriesView.readHistoryPlural",
+                  { count: readCount },
+                )}{" "}
+                ·{" "}
                 <button
                   onClick={onForget}
-                  className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  className="underline-offset-2 hover:text-foreground hover:underline"
                 >
                   {t("seriesView.forget")}
                 </button>
-              </>
+              </span>
             )}
-          </div>
-        )}
-
-        {series.description && (
-          <div>
-            <p
-              className={cn(
-                "whitespace-pre-line text-xs leading-relaxed text-muted-foreground",
-                !expanded && "line-clamp-3",
-              )}
-              data-selectable
-            >
-              {series.description}
-            </p>
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className="mt-1.5 text-xs text-primary underline-offset-4 hover:underline"
-            >
-              {expanded ? t("seriesView.showLess") : t("seriesView.showMore")}
-            </button>
           </div>
         )}
       </div>

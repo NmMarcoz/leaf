@@ -1,4 +1,5 @@
-//! The shapes every [`crate::Source`] speaks in, regardless of what backs it.
+//! The shapes every source speaks in, regardless of what backs it, and the
+//! three role traits a source can be registered under.
 //!
 //! `VolumeChapters`/`ChapterRef`/`VolumeCover` are reused directly from
 //! `leaf-meta` rather than redeclared here: none of the three carries a
@@ -13,23 +14,101 @@ pub use leaf_meta::{ChapterRef, VolumeChapters, VolumeCover};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+/// What a source *is*, which decides what it may do.
+///
+/// A closed set on purpose. The line that matters is that only a `Reader`
+/// may hand out page URLs: a metadata or enrich script that defines
+/// `page_list` is refused at load, not filtered at a call site, so "this
+/// source cannot download pages" is something the loader guarantees rather
+/// than something every caller has to remember.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    /// Browse titles and the published volume → chapter map. Never pages.
+    Metadata,
+    /// Descriptions, alt titles, a series cover. No volume map, no pages.
+    Enrich,
+    /// Serves chapter pages.
+    Reader,
+}
+
+impl Kind {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "metadata" => Some(Self::Metadata),
+            "enrich" => Some(Self::Enrich),
+            "reader" => Some(Self::Reader),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Enrich => "enrich",
+            Self::Reader => "reader",
+        }
+    }
+}
+
+impl std::fmt::Display for Kind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.as_str())
+    }
+}
+
+/// The level of the host API (`leaf.*` and the manifest/function contract)
+/// this build offers. A script declaring a higher `SOURCE.api` is refused at
+/// load with "needs a newer Leaf" instead of failing halfway through a call.
+///
+/// An integer rather than the app's version: the app version moves with
+/// every UI release and the crate's own version does not track it at all,
+/// while this only moves when a script could tell the difference. Bump it
+/// whenever `leaf.*` gains something a script might depend on.
+pub const API_LEVEL: u32 = 1;
+
 /// What a source is, for listing in an Extensions screen and for namespacing
 /// `leaf-library`'s `series.source` column.
 ///
-/// `Serialize`/`Deserialize` (unlike `Source` itself, which cannot cross a
+/// `Serialize`/`Deserialize` (unlike the source traits, which cannot cross a
 /// thread boundary let alone IPC): this crosses into the Tauri frontend for
 /// an Add-from-source picker exactly like `leaf_meta::SeriesMatch` does.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceInfo {
     /// Stable and namespaced, e.g. `"leaf.mangadex"` or `"user.some-site"`.
     /// This is the exact string stored in `series.source` — that column is
-    /// already free text, added for this reason.
+    /// already free text, added for this reason. `user.` means "not built
+    /// in", not "personal": scripts from a shared repository use it too.
     pub id: String,
     pub name: String,
+    pub kind: Kind,
     /// ISO 639-1, or `"multi"` for a source that carries many languages itself
     /// (MangaDex, being crowd-translated, is the obvious example).
     pub lang: String,
     pub base_url: String,
+    /// Further origins `leaf.http` may reach. Shown at the gate because they
+    /// widen what the approval covers.
+    #[serde(default)]
+    pub mirrors: Vec<String>,
+    /// One line on what the source is, written by its author.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The host API level the script was written against.
+    #[serde(default = "default_api")]
+    pub api: u32,
+    /// The source's catalogue is mostly adult content. Declared, not
+    /// detected — it is what lets a picker label it before anyone browses.
+    #[serde(default)]
+    pub nsfw: bool,
+    /// The functions the source actually answers, in its kind's terms — what
+    /// the panel shows as "search · chapters · pages", and what tells a
+    /// manual-link-only reader (no `search`) from one that can resolve.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+fn default_api() -> u32 {
+    API_LEVEL
 }
 
 /// One row in a popular/latest/search results page.
@@ -70,90 +149,59 @@ pub struct MangaDetails {
 }
 
 impl MangaDetails {
-    /// Best-effort series metadata: `source.manga_details(id)` first, then
-    /// whatever it left blank — or, if the call failed outright, everything —
-    /// is filled in by asking, in order, MangaDex (falling back to Kitsu),
-    /// AniList, and Jikan (an unofficial MyAnimeList API). Each is tried in
-    /// turn regardless of whether an earlier one answered, so a title only
-    /// AniList carries a cover for still gets it even after MangaDex supplied
-    /// the description.
-    ///
-    /// A scraped site's markup is far more likely to break than any of the
-    /// three metadata databases, and this is what lets adding a series
-    /// survive that instead of failing outright. Never overrides a field the
-    /// source *did* supply: its own page is the more specific answer when it
-    /// has one. `fallback_title` — the title already on hand from whichever
-    /// catalogue listing this series was picked from — is the search query
-    /// when the source's own call didn't get far enough to supply one itself.
-    pub fn best_effort(source: &dyn Source, external_id: &str, fallback_title: &str) -> Self {
-        let mut details = source
-            .manga_details(external_id)
-            .unwrap_or_else(|_| MangaDetails {
-                title: fallback_title.to_string(),
-                ..Default::default()
-            });
-        if details.title.is_empty() {
-            details.title = fallback_title.to_string();
+    /// Fill every field still blank from `other`, never overriding one that
+    /// is already set: whichever provider answered first is the more
+    /// specific answer, and the chain only exists to cover its gaps.
+    pub fn fill_gaps(&mut self, other: MangaDetails) {
+        if self.title.is_empty() {
+            self.title = other.title;
         }
-        let query = details.title.clone();
-        details.fill_from_metadata_search(&query);
-        details
-    }
-
-    /// The MangaDex-then-Kitsu, then AniList, then Jikan chain alone, with no
-    /// source page of its own to try first — what a series already backed by
-    /// MangaDex or Kitsu refetches from, and what `best_effort` layers a
-    /// source's own page on top of. Each tier is tried regardless of whether
-    /// an earlier one answered, so a title only AniList carries a cover for
-    /// still gets it even after MangaDex supplied the description.
-    pub fn fill_from_metadata_search(&mut self, query: &str) {
-        let hints = [
-            leaf_meta::search(query, 1)
-                .ok()
-                .and_then(|mut hits| hits.drain(..).next())
-                .map(leaf_meta::MetadataHint::from),
-            leaf_meta::anilist::search(query).ok().flatten(),
-            leaf_meta::jikan::search(query).ok().flatten(),
-        ];
-        for hint in hints.into_iter().flatten() {
-            self.fill_from_hint(hint);
-        }
-    }
-
-    fn fill_from_hint(&mut self, hint: leaf_meta::MetadataHint) {
-        if self.title_romaji.is_none() {
-            self.title_romaji = hint.title_romaji;
-        }
-        if self.title_native.is_none() {
-            self.title_native = hint.title_native;
-        }
-        if self.author.is_none() {
-            self.author = hint.author;
-        }
-        if self.artist.is_none() {
-            self.artist = hint.artist;
-        }
-        if self.description.is_none() {
-            self.description = hint.description;
-        }
-        if self.content_rating.is_none() {
-            self.content_rating = hint.content_rating;
-        }
+        fill(&mut self.title_romaji, other.title_romaji);
+        fill(&mut self.title_native, other.title_native);
+        fill(&mut self.author, other.author);
+        fill(&mut self.artist, other.artist);
+        fill(&mut self.description, other.description);
+        fill(&mut self.content_rating, other.content_rating);
+        fill(&mut self.cover_url, other.cover_url);
         if self.tags.is_empty() {
-            self.tags = hint.tags;
+            self.tags = other.tags;
         }
-        if self.cover_url.is_none() {
-            self.cover_url = hint.cover_url;
+        if self.available_languages.is_empty() {
+            self.available_languages = other.available_languages;
         }
     }
 }
 
-/// One manga source: a catalogue to browse and a way to read what's in it.
+fn fill(slot: &mut Option<String>, value: Option<String>) {
+    if slot.is_none() {
+        *slot = value;
+    }
+}
+
+impl From<leaf_meta::MetadataHint> for MangaDetails {
+    fn from(hint: leaf_meta::MetadataHint) -> Self {
+        MangaDetails {
+            title: String::new(),
+            title_romaji: hint.title_romaji,
+            title_native: hint.title_native,
+            author: hint.author,
+            artist: hint.artist,
+            description: hint.description,
+            tags: hint.tags,
+            content_rating: hint.content_rating,
+            available_languages: Vec::new(),
+            cover_url: hint.cover_url,
+        }
+    }
+}
+
+/// A catalogue: browse titles, read a series' facts and its published
+/// volume → chapter map. What Explore and "add from source" talk to.
 ///
-/// Method names and shapes mirror Tachiyomi's own `CatalogueSource`/
-/// `HttpSource` on purpose — porting a Keiyoushi extension into this trait
-/// later is meant to be a mechanical translation, not a redesign.
-pub trait Source: Send + Sync {
+/// Method names and shapes mirror Tachiyomi's own `CatalogueSource` on
+/// purpose — porting a Keiyoushi extension is meant to be a mechanical
+/// translation, not a redesign.
+pub trait MetadataSource: Send + Sync {
     fn info(&self) -> &SourceInfo;
 
     fn popular(&self, page: u32) -> Result<MangasPage>;
@@ -168,7 +216,43 @@ pub trait Source: Send + Sync {
 
     /// Per-volume cover art, when the source publishes any.
     fn covers(&self, id: &str) -> Result<Vec<VolumeCover>>;
+}
+
+/// A details-only provider, asked to fill what a series' own source left
+/// blank.
+///
+/// One `lookup(title)` rather than `search` + `details`: the native
+/// providers (AniList, Jikan) answer a title in one request with no id, and
+/// AniList allows thirty a minute, so a two-call trait would double the cost
+/// for nothing. A Lua enrich script still writes `search` + `details`; its
+/// adapter composes them.
+pub trait EnrichSource: Send + Sync {
+    fn info(&self) -> &SourceInfo;
+
+    /// The best single match for `title`, or `None` when there is none.
+    fn lookup(&self, title: &str) -> Result<Option<MangaDetails>>;
+}
+
+/// A source of chapter pages.
+///
+/// `search` + `chapters` are how "chapter 7 of this series" becomes this
+/// site's own chapter id; a reader without them only serves chapters the
+/// user links by hand, and says so through [`ReaderSource::can_resolve`].
+pub trait ReaderSource: Send + Sync {
+    fn info(&self) -> &SourceInfo;
+
+    fn search(&self, query: &str, page: u32) -> Result<MangasPage>;
+
+    /// Every chapter of one series on this site — for resolution, never
+    /// rendered as the series' volume map.
+    fn chapters(&self, manga_id: &str) -> Result<Vec<ChapterRef>>;
 
     /// Image URLs for one chapter, in reading order.
     fn page_list(&self, chapter_id: &str) -> Result<Vec<String>>;
+
+    /// Whether `search` and `chapters` are both answered.
+    fn can_resolve(&self) -> bool {
+        let caps = &self.info().capabilities;
+        caps.iter().any(|c| c == "search") && caps.iter().any(|c| c == "chapters")
+    }
 }

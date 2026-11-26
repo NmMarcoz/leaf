@@ -42,6 +42,21 @@ impl Default for DeliveryConfig {
     }
 }
 
+/// An extension repository the user added: a URL they typed, never one the
+/// app suggested. Nothing ships pre-filled here, and nothing may — see
+/// `leaf_extensions::repo`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtensionRepo {
+    /// The index URL, normalised (`…/index.json`).
+    pub url: String,
+    /// What the repository called itself when it was added.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Unix seconds.
+    #[serde(default)]
+    pub added_at: u64,
+}
+
 /// Everything the user can configure, as the frontend sees it.
 ///
 /// Paths are resolved here rather than in the UI, so `library_root` and
@@ -117,6 +132,25 @@ pub struct Settings {
     /// wherever the author left it.
     #[serde(default)]
     pub disabled_extensions: Vec<String>,
+    /// Extension repositories, in the order added. Empty by default and on
+    /// every fresh install.
+    #[serde(default)]
+    pub extension_repos: Vec<ExtensionRepo>,
+    /// The language of the app's own text (`"en"`, `"pt-BR"`). `None` means
+    /// follow the system, which is also what an older file says — the choice
+    /// is only stored once the user makes one. A series keeps whatever
+    /// language it was published in either way.
+    #[serde(default)]
+    pub ui_language: Option<String>,
+    /// The readers volumes are built for and sent to. A settings file from
+    /// before devices existed comes back as one, built from the old global
+    /// build settings and Kindle address — see `devices::migrated`.
+    #[serde(default)]
+    pub devices: Vec<crate::devices::Device>,
+    /// The `id` of the device builds start from and "Send to" uses. A stale
+    /// id (the device was removed) falls back to the first device.
+    #[serde(default)]
+    pub default_device: Option<String>,
 }
 
 /// The on-disk shape. Every field optional so an older file still loads.
@@ -136,6 +170,10 @@ struct Stored {
     approved_extensions: Option<Vec<String>>,
     dev_extensions: Option<Vec<String>>,
     disabled_extensions: Option<Vec<String>>,
+    extension_repos: Option<Vec<ExtensionRepo>>,
+    ui_language: Option<String>,
+    devices: Option<Vec<crate::devices::Device>>,
+    default_device: Option<String>,
 }
 
 pub fn load(app: &AppHandle) -> Result<Settings> {
@@ -150,6 +188,26 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
     // rather than something a user has to be talked through.
     #[cfg(not(desktop))]
     let output_root = Some(default_output_root(app)?);
+
+    // A file from before devices existed: its global build settings and
+    // Kindle address become the first device, so upgrading changes nothing
+    // about what a build produces or where "Send" goes. Only for an install
+    // that was already set up — a fresh one adds its first reader itself.
+    let devices = match stored.devices.clone() {
+        Some(devices) => devices,
+        None if stored.welcomed.unwrap_or(false) => vec![crate::devices::migrated(
+            stored.default_format.as_deref().unwrap_or("epub"),
+            stored.compression.as_deref().unwrap_or("kindle"),
+            custom(stored.custom_compression.unwrap_or_default()),
+            stored.split_spreads.unwrap_or(true),
+            stored.delivery.as_ref().map(|d| d.kindle_email.as_str()).unwrap_or(""),
+        )],
+        None => Vec::new(),
+    };
+    let default_device = stored
+        .default_device
+        .clone()
+        .or_else(|| devices.first().map(|d| d.id.clone()));
 
     Ok(Settings {
         library_root: match stored.library_root {
@@ -176,6 +234,10 @@ pub fn load(app: &AppHandle) -> Result<Settings> {
         approved_extensions: stored.approved_extensions.unwrap_or_default(),
         dev_extensions: stored.dev_extensions.unwrap_or_default(),
         disabled_extensions: stored.disabled_extensions.unwrap_or_default(),
+        extension_repos: stored.extension_repos.unwrap_or_default(),
+        ui_language: stored.ui_language,
+        devices,
+        default_device,
     })
 }
 
@@ -198,31 +260,42 @@ pub fn save(app: &AppHandle, next: &Settings) -> Result<()> {
             approved_extensions: Some(next.approved_extensions.clone()),
             dev_extensions: Some(next.dev_extensions.clone()),
             disabled_extensions: Some(next.disabled_extensions.clone()),
+            extension_repos: Some(next.extension_repos.clone()),
+            ui_language: next.ui_language.clone(),
+            devices: Some(next.devices.clone()),
+            default_device: next.default_device.clone(),
         },
     )
-}
-
-/// Turn the stored preset name into the settings the writers take.
-pub fn compression(settings: &Settings) -> leaf_core::Compression {
-    use leaf_core::Compression;
-    match settings.compression.as_str() {
-        "original" => Compression::ORIGINAL,
-        "large" => Compression::LARGE,
-        "compact" => Compression::COMPACT,
-        "custom" => custom(settings.custom_compression),
-        _ => Compression::KINDLE,
-    }
 }
 
 fn custom(c: leaf_core::Compression) -> leaf_core::Compression {
     leaf_core::Compression::custom(c.max_edge, c.quality, c.grayscale)
 }
 
-/// What the writers need from the settings, so the editor's build and a batch
-/// build cannot disagree about it.
-pub fn write_options(settings: &Settings) -> leaf_core::WriteOptions {
+/// A device by id, or the default one when `id` is `None`.
+///
+/// The default is whatever `default_device` names, else the first device: a
+/// removed default must not leave builds with nothing to start from.
+pub fn device<'a>(settings: &'a Settings, id: Option<&str>) -> Option<&'a crate::devices::Device> {
+    let wanted = id.or(settings.default_device.as_deref());
+    wanted
+        .and_then(|w| settings.devices.iter().find(|d| d.id == w))
+        .or_else(|| if id.is_some() { None } else { settings.devices.first() })
+}
+
+/// The build profile for a device (`None` = the default one), or the old
+/// Kindle-sized defaults when there are no devices at all.
+pub fn profile(settings: &Settings, id: Option<&str>) -> crate::devices::Profile {
+    device(settings, id)
+        .map(|d| d.profile())
+        .unwrap_or_else(crate::devices::fallback_profile)
+}
+
+/// What the writers need, so the editor's build and a batch build cannot
+/// disagree about it. Page size and greyscale come from the device.
+pub fn write_options(settings: &Settings, id: Option<&str>) -> leaf_core::WriteOptions {
     leaf_core::WriteOptions {
-        compression: compression(settings),
+        compression: profile(settings, id).compression,
         cover_badge: settings.cover_badge,
     }
 }

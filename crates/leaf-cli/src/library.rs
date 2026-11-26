@@ -26,7 +26,7 @@ pub enum LibraryCommand {
     /// Add a series found directly through a registered source — built in, or
     /// a `.lua` extension — for a site MangaDex/Kitsu don't list at all.
     AddSource {
-        /// A registered source id, e.g. `user.example` — see `sources list`.
+        /// A registered catalogue's id, e.g. `user.some-site` — see `sources list`.
         source: String,
         query: String,
         #[arg(long, default_value_t = 1)]
@@ -218,8 +218,8 @@ fn add_source(
     pick: usize,
 ) -> Result<()> {
     let source = registry
-        .get(source_id)
-        .ok_or_else(|| anyhow!("unknown source {source_id:?} — see `Leaf sources list`"))?;
+        .metadata(source_id)
+        .map_err(|e| anyhow!("{e} — see `Leaf sources list`"))?;
 
     let hits = source.search(query, 1)?.manga;
     if hits.is_empty() {
@@ -233,7 +233,7 @@ fn add_source(
     }
 
     let hit = &hits[pick - 1];
-    let details = leaf_extensions::MangaDetails::best_effort(source.as_ref(), &hit.id, &hit.title);
+    let details = registry.best_effort(source.as_ref(), &hit.id, &hit.title);
     let series = library.add_series(NewSeries {
         source: Some(source_id.to_string()),
         source_id: Some(hit.id.clone()),
@@ -284,8 +284,8 @@ fn sync(library: &mut Library, registry: &Registry, id: SeriesId) -> Result<()> 
         )
     } else {
         let extension = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("unknown source {source:?} — is its extension installed?"))?;
+            .metadata(&source)
+            .map_err(|e| anyhow!("{e} — is its extension installed and approved?"))?;
         (extension.volumes(&source_id, None)?, extension.covers(&source_id)?)
     };
 
@@ -357,7 +357,7 @@ fn sync(library: &mut Library, registry: &Registry, id: SeriesId) -> Result<()> 
 /// re-fetching the blurb are different costs and different failure modes.
 ///
 /// Runs the same fallback chain `add`/`add-source` do at add time
-/// (`MangaDetails::best_effort`): the source's own listing first for a
+/// (`Registry::best_effort`): the source's own listing first for a
 /// registered extension, MangaDex falling back to Kitsu for the metadata
 /// pair, then AniList, then Jikan, for whatever is still blank.
 fn refetch(library: &Library, registry: &Registry, id: SeriesId) -> Result<()> {
@@ -371,13 +371,13 @@ fn refetch(library: &Library, registry: &Registry, id: SeriesId) -> Result<()> {
         // MangaDex/Kitsu are themselves the metadata pair, so there is no
         // source page of their own to try first.
         let mut details = leaf_extensions::MangaDetails::default();
-        details.fill_from_metadata_search(&series.title);
+        registry.enrich(&mut details, &series.title);
         details
     } else {
         let extension = registry
-            .get(&source)
-            .ok_or_else(|| anyhow!("unknown source {source:?} — is its extension installed?"))?;
-        leaf_extensions::MangaDetails::best_effort(extension.as_ref(), &source_id, &series.title)
+            .metadata(&source)
+            .map_err(|e| anyhow!("{e} — is its extension installed and approved?"))?;
+        registry.best_effort(extension.as_ref(), &source_id, &series.title)
     };
 
     library.set_classification(id, &details.tags, details.content_rating.as_deref())?;
@@ -577,8 +577,8 @@ fn pages_from_source(
         .as_deref()
         .ok_or_else(|| anyhow!("{} has no source — pass a URL instead", series.title))?;
     let source = registry
-        .get(source_name)
-        .ok_or_else(|| anyhow!("{source_name:?} is not a registered source — pass a URL instead"))?;
+        .reader_for(source_name)
+        .map_err(|e| anyhow!("{e} — pass a URL instead"))?;
 
     let chapter_source_id = library
         .volumes(id)?
@@ -689,8 +689,8 @@ fn batch_from_source(
         .as_deref()
         .ok_or_else(|| anyhow!("{} has no source — pass a chapter URL instead", series.title))?;
     let source = registry
-        .get(source_name)
-        .ok_or_else(|| anyhow!("{source_name:?} is not a registered source — pass a chapter URL instead"))?;
+        .reader_for(source_name)
+        .map_err(|e| anyhow!("{e} — pass a chapter URL instead"))?;
 
     let ready: Vec<&ChapterStatus> = missing.iter().filter(|c| c.source_id.is_some()).collect();
     let unresolved: Vec<&str> = missing
@@ -745,7 +745,7 @@ fn batch_from_source(
 /// own id rather than a scraped page.
 fn fetch_from_source(
     library: &Library,
-    source: &dyn leaf_extensions::Source,
+    source: &dyn leaf_extensions::ReaderSource,
     id: SeriesId,
     number: &str,
     chapter_source_id: &str,

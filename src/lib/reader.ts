@@ -93,10 +93,33 @@ export type ReaderTarget =
 
 export interface OnlineChapter {
   pages: string[];
-  /** The publisher's own page, when the source only indexes this chapter. */
-  external_url: string | null;
-  /** Ready to show. Null when the pages came back fine. */
-  message: string | null;
+}
+
+/**
+ * Where reopening a history entry goes.
+ *
+ * How it was read decides: a downloaded chapter comes off disk, a streamed one
+ * goes back to the source in the translation it was read in. The chapter list
+ * is left for the reader to fetch — it needs it anyway, and history is the one
+ * entry point that has never had it.
+ */
+export function historyTarget(entry: HistoryEntry): ReaderTarget {
+  if (entry.downloaded || !entry.chapter_source_id || !entry.series_source_id) {
+    return { kind: "library", seriesId: entry.series_id, chapter: entry.chapter };
+  }
+  return {
+    kind: "online",
+    source: entry.source ?? "mangadex",
+    chapterId: entry.chapter_source_id,
+    seriesTitle: entry.series_title,
+    chapterNumber: entry.chapter,
+    direction: "right-to-left",
+    language: entry.language,
+    chapters: [],
+    seriesSourceId: entry.series_source_id,
+    coverUrl: null,
+    librarySeriesId: entry.series_id,
+  };
 }
 
 export const readerOnlineChapter = (source: string, chapterId: string) =>
@@ -258,7 +281,19 @@ export interface ReaderPrefs {
   background: "black" | "grey" | "white";
   /** How a paged turn moves. "none" keeps the old instant swap. */
   animation: "slide" | "fade" | "none";
+  /**
+   * How wide the webtoon strip is drawn, in CSS pixels; `null` is the
+   * default. A strip is as tall as its width makes it, so on a wide window
+   * the default can be too big to read a panel at a glance — narrowing it is
+   * the strip's "zoom out", which zooming each image could never give.
+   */
+  stripWidth: number | null;
 }
+
+/** The strip's width when the user has not set one (Tailwind's max-w-4xl). */
+export const STRIP_DEFAULT = 896;
+/** Narrower than this and speech bubbles stop being legible. */
+export const STRIP_MIN = 240;
 
 const PREFS_KEY = "leaf:reader-prefs";
 
@@ -268,6 +303,7 @@ export const defaultPrefs = (): ReaderPrefs => ({
   direction: null,
   background: "black",
   animation: "slide",
+  stripWidth: null,
 });
 
 export function loadPrefs(): ReaderPrefs {

@@ -14,10 +14,10 @@ export function Progress({
       aria-valuenow={pct}
       aria-valuemin={0}
       aria-valuemax={100}
-      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-secondary", className)}
+      className={cn("h-1 w-full overflow-hidden rounded-full bg-sunken", className)}
     >
       <div
-        className="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
+        className="h-full rounded-full bg-strong transition-[width] duration-150 ease-out"
         style={{ width: `${pct}%` }}
       />
     </div>

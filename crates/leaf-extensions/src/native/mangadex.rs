@@ -1,9 +1,21 @@
-//! MangaDex as a [`Source`], delegating to the existing `leaf-meta` client.
+//! MangaDex as a catalogue and an enricher, delegating to the existing
+//! `leaf-meta` client.
+//!
+//! Metadata only, on purpose: the catalogue, the volume map and the covers
+//! are what it is for, and the enrich role is the title search (with Kitsu
+//! as its fallback) that fills gaps for any other source, kept first in the
+//! chain as it always was. It is **not** a reader. The binary fetches no
+//! MangaDex pages — a MangaDex chapter id becomes pages only through a
+//! user-installed reader script declaring `mangadex.org`, found by
+//! `Registry::reader_for`.
 
 use anyhow::Result;
 use leaf_meta::{BrowseQuery, SeriesMatch, Sort};
 
-use crate::types::{MangaDetails, MangaSummary, MangasPage, Source, SourceInfo};
+use crate::types::{
+    EnrichSource, Kind, MangaDetails, MangaSummary, MangasPage, MetadataSource, SourceInfo,
+    API_LEVEL,
+};
 
 /// The id `series.source` stores for a MangaDex-backed library entry.
 pub const ID: &str = "leaf.mangadex";
@@ -18,16 +30,26 @@ impl Default for MangaDexSource {
             info: SourceInfo {
                 id: ID.to_string(),
                 name: "MangaDex".to_string(),
+                kind: Kind::Metadata,
                 // Crowd-translated rather than one fixed language; `volumes`
                 // takes its own `language` argument per call instead.
                 lang: "multi".to_string(),
                 base_url: "https://mangadex.org".to_string(),
+                mirrors: Vec::new(),
+                description: None,
+                api: API_LEVEL,
+                nsfw: false,
+                capabilities: [
+                    "popular", "latest", "search", "details", "volumes", "covers",
+                ]
+                .map(String::from)
+                .to_vec(),
             },
         }
     }
 }
 
-impl Source for MangaDexSource {
+impl MetadataSource for MangaDexSource {
     fn info(&self) -> &SourceInfo {
         &self.info
     }
@@ -65,9 +87,22 @@ impl Source for MangaDexSource {
     fn covers(&self, id: &str) -> Result<Vec<leaf_meta::VolumeCover>> {
         leaf_meta::volume_covers(leaf_meta::Source::MangaDex, id)
     }
+}
 
-    fn page_list(&self, chapter_id: &str) -> Result<Vec<String>> {
-        leaf_meta::chapter_pages(leaf_meta::Source::MangaDex, chapter_id)
+impl EnrichSource for MangaDexSource {
+    fn info(&self) -> &SourceInfo {
+        &self.info
+    }
+
+    /// `leaf_meta::search`, not this source's own `search`: the former falls
+    /// back to Kitsu when MangaDex has nothing, which is the behaviour the
+    /// chain has always had. A separate Kitsu entry would run it on every
+    /// lookup instead of only on a miss.
+    fn lookup(&self, title: &str) -> Result<Option<MangaDetails>> {
+        Ok(leaf_meta::search(title, 1)?
+            .into_iter()
+            .next()
+            .map(|hit| MangaDetails::from(leaf_meta::MetadataHint::from(hit))))
     }
 }
 
@@ -119,7 +154,7 @@ mod tests {
 
     #[test]
     fn info_id_matches_the_public_constant() {
-        assert_eq!(MangaDexSource::default().info().id, ID);
+        assert_eq!(MetadataSource::info(&MangaDexSource::default()).id, ID);
     }
 
     #[test]

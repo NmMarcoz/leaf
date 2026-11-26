@@ -38,6 +38,7 @@ const dict: PartialDictionary = {
       "The password is kept in {keychain}, never in Leaf's settings file. Leave the field blank to keep the stored one; clear it and save to forget it.",
     "sendView.windowsCredentialManager": "Windows Credential Manager",
     "sendView.macKeychain": "the macOS Keychain",
+    "sendView.systemKeyring": "the system keyring",
     "sendView.testSuccess":
       "Your mail server accepted the message. If it does not reach the device, the sender address is not approved with Amazon.",
   },
@@ -78,6 +79,7 @@ const dict: PartialDictionary = {
       "A senha é guardada no {keychain}, nunca no arquivo de configurações do Leaf. Deixe o campo em branco para manter a senha salva; limpe-o e salve para esquecê-la.",
     "sendView.windowsCredentialManager": "Gerenciador de Credenciais do Windows",
     "sendView.macKeychain": "Chaveiro do macOS",
+    "sendView.systemKeyring": "chaveiro do sistema",
     "sendView.testSuccess":
       "Seu servidor de e-mail aceitou a mensagem. Se ela não chegar ao dispositivo, o endereço do remetente não está aprovado na Amazon.",
   },

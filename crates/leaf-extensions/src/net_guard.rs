@@ -14,10 +14,16 @@
 //! Redirects are refused by the agent and followed by `host::http` by hand,
 //! because a hop is a new URL and every new URL re-runs both checks.
 //!
-//! `LEAF_ALLOW_PRIVATE_SOURCES=1` turns the guard off. That is not a hole in
-//! the app: the variable lives in the user's own environment, and without the
-//! escape the end-to-end tests (which serve fixtures from `127.0.0.1`) and
-//! anyone developing a script against a local server could not run at all.
+//! `LEAF_ALLOW_PRIVATE_SOURCES=1` turns the guard off for scripts. That is
+//! not a hole in the app: the variable lives in the user's own environment,
+//! and without the escape the end-to-end tests (which serve fixtures from
+//! `127.0.0.1`) and anyone developing a script against a local server could
+//! not run at all.
+//!
+//! Extension repositories ([`crate::repo`]) go through the same guard under
+//! their own [`Scope`] and their own variable, `LEAF_ALLOW_PRIVATE_REPOS=1`.
+//! Scraping a local fixture and trusting some other machine's list of code
+//! are different decisions; one switch must not quietly make both.
 
 use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
@@ -29,10 +35,25 @@ use ureq::Agent;
 /// budget is only useful to someone steering a request around the guard.
 pub const MAX_HOPS: usize = 5;
 
-/// The agent both doors share: guarded resolver, no automatic redirects.
+/// Who is asking, which decides which environment variable may turn the
+/// guard off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// A source script's `leaf.http` and the page URLs it hands back.
+    Scripts,
+    /// Fetching an extension repository's index and scripts.
+    Repos,
+}
+
+/// The agent both script doors share: guarded resolver, no automatic redirects.
 pub fn guarded_agent() -> Agent {
+    agent_for(Scope::Scripts)
+}
+
+/// [`guarded_agent`] for a given [`Scope`].
+pub fn agent_for(scope: Scope) -> Agent {
     ureq::AgentBuilder::new()
-        .resolver(|netloc: &str| resolve_public(netloc))
+        .resolver(move |netloc: &str| resolve_public(netloc, scope))
         .redirects(0)
         .build()
 }
@@ -41,7 +62,12 @@ pub fn guarded_agent() -> Agent {
 /// check, used before any DNS on paths where resolving is not wanted (the
 /// `page_list` filter runs on a few dozen URLs at once).
 pub fn url_is_public(url: &str) -> bool {
-    if disabled() {
+    url_is_public_for(url, Scope::Scripts)
+}
+
+/// [`url_is_public`] for a given [`Scope`].
+pub fn url_is_public_for(url: &str, scope: Scope) -> bool {
+    if disabled(scope) {
         return true;
     }
     match host_of(url) {
@@ -119,19 +145,23 @@ fn ip_is_public(ip: &IpAddr) -> bool {
     }
 }
 
-fn disabled() -> bool {
+fn disabled(scope: Scope) -> bool {
+    let variable = match scope {
+        Scope::Scripts => "LEAF_ALLOW_PRIVATE_SOURCES",
+        Scope::Repos => "LEAF_ALLOW_PRIVATE_REPOS",
+    };
     // Each call, not once at startup: the tests flip this at runtime.
-    std::env::var_os("LEAF_ALLOW_PRIVATE_SOURCES").is_some_and(|v| v == "1")
+    std::env::var_os(variable).is_some_and(|v| v == "1")
 }
 
 /// The ureq resolver: every address the connection may use is checked here,
 /// and only the surviving ones are handed back — so a host can be DNS-rebound
 /// between this lookup and ureq's dial only onto an address this function
 /// already approved.
-fn resolve_public(netloc: &str) -> io::Result<Vec<SocketAddr>> {
+fn resolve_public(netloc: &str, scope: Scope) -> io::Result<Vec<SocketAddr>> {
     let (host_only, port) = split_netloc(netloc);
 
-    if disabled() {
+    if disabled(scope) {
         return (host_only, port)
             .to_socket_addrs()
             .map(|iter| iter.collect());
@@ -146,7 +176,7 @@ fn resolve_public(netloc: &str) -> io::Result<Vec<SocketAddr>> {
         if !ip_is_public(&ip) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "source scripts may not reach private network addresses",
+                "private network addresses are refused",
             ));
         }
     }
@@ -211,7 +241,7 @@ mod tests {
     #[test]
     fn ordinary_sites_are_public() {
         for url in [
-            "https://site.example/manga/1",
+            "https://manga.example.com/manga/1",
             "https://api.example.test:8443/v1",
             "https://user@[::ffff:8.8.8.8]:8443/x", // v4-mapped public is still public
         ] {
@@ -230,9 +260,9 @@ mod tests {
     #[test]
     fn resolving_a_private_literal_fails_closed() {
         // Without the env bypass, even no-DNS-needed literals must be refused.
-        let r = resolve_public("169.254.169.254:80");
+        let r = resolve_public("169.254.169.254:80", Scope::Scripts);
         assert!(r.is_err());
-        let r = resolve_public("localhost:80");
+        let r = resolve_public("localhost:80", Scope::Scripts);
         assert!(r.is_err());
     }
 }

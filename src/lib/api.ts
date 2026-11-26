@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
+import type { Translator } from "@/lib/i18n/types";
 import { canRevealFiles } from "@/lib/platform";
 
 /**
@@ -146,23 +147,24 @@ export const similarSeries = (source: MetaSource, tags: string[], exclude: strin
   invoke<SeriesMatch[]>("similar_series", { source, tags, exclude });
 
 /**
- * Language codes as they should read on screen.
+ * Language codes as they should read on screen, in the UI's own language.
  *
  * MangaDex uses a mix of plain and regioned codes, and `Intl.DisplayNames`
- * handles both; the map only covers the few it renders unhelpfully.
+ * handles both; the dictionary only covers the few it renders unhelpfully.
+ * `t` supplies both those and the locale `Intl` names the rest in.
  */
-export const languageName = (code: string): string => {
+export const languageName = (code: string, t: Translator): string => {
   const special: Record<string, string> = {
-    "pt-br": "Portuguese (Brazil)",
-    "es-la": "Spanish (Latin America)",
-    "zh-hk": "Chinese (Hong Kong)",
-    "ja-ro": "Japanese (romanised)",
-    "ko-ro": "Korean (romanised)",
-    "zh-ro": "Chinese (romanised)",
+    "pt-br": "api.languagePtBr",
+    "es-la": "api.languageEsLa",
+    "zh-hk": "api.languageZhHk",
+    "ja-ro": "api.languageJaRo",
+    "ko-ro": "api.languageKoRo",
+    "zh-ro": "api.languageZhRo",
   };
-  if (special[code]) return special[code];
+  if (special[code]) return t(special[code]);
   try {
-    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code;
+    return new Intl.DisplayNames([t("api.displayLocale")], { type: "language" }).of(code) ?? code;
   } catch {
     return code;
   }
@@ -174,18 +176,30 @@ export const saveCover = (url: string) => invoke<string>("save_cover", { url });
 export const sourceLabel = (source: MetaSource) =>
   source === "mangadex" ? "MangaDex" : "Kitsu";
 
+/** What a source is, and so what it may do. Mirrors `leaf_extensions::Kind`. */
+export type SourceKind = "metadata" | "enrich" | "reader";
+
 /**
- * A registered `Source` beyond the MangaDex/Kitsu pair: built in, or a
+ * A registered source beyond the MangaDex/Kitsu pair: built in, or a
  * `.lua` extension under `<library>/extensions/`. Mirrors
  * `leaf_extensions::SourceInfo`.
  */
 export interface SourceInfo {
-  /** Stable and namespaced, e.g. `leaf.mangadex` or `user.example` —
+  /** Stable and namespaced, e.g. `leaf.mangadex` or `user.some-site` —
    * this is the exact string stored in a `Series`' `source` column. */
   id: string;
   name: string;
+  kind: SourceKind;
   lang: string;
   base_url: string;
+  /** Further origins the script may reach; widen what an approval covers. */
+  mirrors: string[];
+  description: string | null;
+  /** Host API level the script was written for. */
+  api: number;
+  nsfw: boolean;
+  /** What it answers: `search`, `chapters`, `pages`, `details`, `catalogue`, … */
+  capabilities: string[];
 }
 
 /** One row of a registered source's catalogue. Mirrors `MangaSummary`. */
@@ -222,15 +236,51 @@ export type ScriptState = "approved" | "dev" | "pending" | "disabled" | "broken"
 /** One `.lua` file in the extensions folder, as the panel lists it. Mirrors
  * `UserScript`. `info` is absent exactly when the script failed to load, in
  * which case `error` explains why the row renders anyway. */
-export interface UserScript {
+export interface UserScript extends Partial<SourceInfo> {
   file: string;
   fingerprint: string;
   state: ScriptState;
-  id?: string;
-  name?: string;
-  lang?: string;
-  base_url?: string;
   error: string;
+  /** What the loader accepted but will not act on. */
+  warnings: string[];
+}
+
+/** An extension repository the user added. Mirrors `settings::ExtensionRepo`. */
+export interface ExtensionRepo {
+  url: string;
+  name: string | null;
+  added_at: number;
+}
+
+/** An index entry against the local folder. Mirrors `repo::RepoStatus`. */
+export type RepoStatus = "not-installed" | "installed" | "update-available" | "incompatible";
+
+/** One script a repository offers. Mirrors `repo::RepoRow` (flattened `RepoScript`). */
+export interface RepoRow {
+  file: string;
+  id: string;
+  name: string;
+  kind: SourceKind;
+  lang: string;
+  base_url: string;
+  mirrors: string[];
+  description: string | null;
+  sha256: string;
+  version: string;
+  api: number;
+  nsfw: boolean;
+  capabilities: string[];
+  status: RepoStatus;
+  local_file: string | null;
+  local_state: ScriptState | null;
+}
+
+/** A repository's index, browsed. Mirrors `sources::RepoBrowse`. */
+export interface RepoBrowse {
+  url: string;
+  name: string | null;
+  rows: RepoRow[];
+  skipped: number;
 }
 
 /** Every registered source, for an Add-from-source or Explore picker. */
@@ -267,6 +317,25 @@ export const removeExtension = (file: string) =>
 export const lockExtension = (file: string) =>
   invoke<string>("lock_extension", { file });
 
+/** The extension repositories the user added. */
+export const listExtensionRepos = () => invoke<ExtensionRepo[]>("list_extension_repos");
+
+/** Add a repository by the address the user typed; its index is read first. */
+export const addExtensionRepo = (url: string) =>
+  invoke<ExtensionRepo>("add_extension_repo", { url });
+
+/** Forget a repository. Scripts installed from it stay. */
+export const removeExtensionRepo = (url: string) =>
+  invoke<void>("remove_extension_repo", { url });
+
+/** Fetch a repository's index and compare it with what is installed. */
+export const browseExtensionRepo = (url: string) =>
+  invoke<RepoBrowse>("browse_extension_repo", { url });
+
+/** Install or update one script from a repository. It lands pending. */
+export const installFromExtensionRepo = (url: string, id: string) =>
+  invoke<string>("install_from_extension_repo", { url, id });
+
 /** Search one registered source's own catalogue. */
 export const searchSource = (source: string, query: string, page: number) =>
   invoke<SourceMangaPage>("search_source", { source, query, page });
@@ -289,8 +358,13 @@ export const volumesSource = (source: string, externalId: string) =>
 
 export const scanFolder = (path: string) => invoke<Volume>("scan", { path });
 
-export const buildVolume = (volume: Volume, out: string, format: Format) =>
-  invoke<BuildReport>("build", { volume, out, format });
+/** `device` picks whose page size and greyscale to write for; `null` = default. */
+export const buildVolume = (
+  volume: Volume,
+  out: string,
+  format: Format,
+  device: string | null = null,
+) => invoke<BuildReport>("build", { volume, out, format, device });
 
 export const suggestFilename = (volume: Volume, format: Format) =>
   invoke<string>("suggest_filename", { volume, format });
@@ -321,16 +395,16 @@ export const effectiveCover = (volume: Volume): string | null => {
   return null;
 };
 
-export const excludeLabel = (reason: ExcludeReason): string => {
+export const excludeLabel = (reason: ExcludeReason, t: Translator): string => {
   switch (reason.reason) {
     case "off-size":
-      return `Off-size ${reason.width}×${reason.height}`;
+      return t("api.excludeOffSize", { width: reason.width, height: reason.height });
     case "unreadable":
-      return "Unreadable";
+      return t("api.excludeUnreadable");
     case "not-a-page":
-      return "Not a page";
+      return t("api.excludeNotAPage");
     case "manual":
-      return "Excluded";
+      return t("api.excludeManual");
   }
 };
 
@@ -380,4 +454,5 @@ export async function deliverBuilt(path: string, title?: string): Promise<void> 
 }
 
 /** What the control doing the above should be called. */
-export const DELIVER_LABEL = canRevealFiles ? "Show" : "Share";
+export const deliverLabel = (t: Translator) =>
+  canRevealFiles ? t("api.deliverShow") : t("api.deliverShare");

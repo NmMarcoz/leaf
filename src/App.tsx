@@ -3,13 +3,14 @@ import { getVersion, onBackButtonPress } from "@tauri-apps/api/app";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
-import { AlertTriangle, ListChecks, Loader2, X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
 import { Splash } from "@/components/Splash";
 import { useTheme } from "@/lib/theme";
+import { LanguageProvider, resolveLanguage, useTranslator } from "@/lib/i18n";
 import { Sidebar, type Section } from "@/components/Sidebar";
-import { TaskPanel, useTasks } from "@/components/TaskPanel";
+import { useTasks } from "@/components/TaskPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { Button } from "@/components/ui/button";
@@ -21,24 +22,30 @@ import { SeriesView } from "@/views/SeriesView";
 import { ExploreView, emptyBrowse, type BrowseState } from "@/views/ExploreView";
 import { HistoryView } from "@/views/HistoryView";
 import { ReaderView } from "@/views/ReaderView";
-import type { ReaderTarget } from "@/lib/reader";
-import { SendView } from "@/views/SendView";
-import { ExtensionsView } from "@/views/ExtensionsView";
-import { SettingsView } from "@/views/SettingsView";
+import { historyTarget, type ReaderTarget } from "@/lib/reader";
+import { SettingsView, type SettingsPage } from "@/views/SettingsView";
+import { TasksView } from "@/views/TasksView";
 import { WelcomeView } from "@/views/WelcomeView";
 import { useUpdater } from "@/hooks/useUpdater";
-import { scanFolder, type MetaSource, type Volume } from "@/lib/api";
+import { scanFolder, type Volume } from "@/lib/api";
 import { unseenChangelog, type ChangelogEntry } from "@/lib/changelog";
-import { getSettings, setSettings as saveSettings, type Settings } from "@/lib/settings";
+import {
+  defaultDevice,
+  getSettings,
+  setSettings as saveSettings,
+  type Settings,
+} from "@/lib/settings";
 import { isMobile } from "@/lib/platform";
 import { recordBuilt, librarySetVolumeCover } from "@/lib/library";
 import { clearThumbnails } from "@/lib/thumbs";
 
 /**
- * Which of the three screens is showing.
+ * Which screen is showing.
  *
- * The library is home. The editor is reached either from a volume the library
- * assembled or from a folder dropped on the window, and does not know which.
+ * The shelf is home, and history, a series and the editor all sit under it.
+ * The editor is reached either from a volume the library assembled or from a
+ * folder dropped on the window, and does not know which. Devices and
+ * extensions are pages of Settings rather than screens of their own.
  */
 type View =
   | { kind: "library" }
@@ -48,9 +55,8 @@ type View =
   // `back` is carried along so closing the reader returns where it was opened
   // from — the series page, history, or the middle of a browse.
   | { kind: "reader"; target: ReaderTarget; back: View }
-  | { kind: "send" }
-  | { kind: "extensions" }
-  | { kind: "settings" }
+  | { kind: "tasks" }
+  | { kind: "settings"; page: SettingsPage }
   | { kind: "editor"; from: { seriesId: number; number: string } | null };
 
 /**
@@ -78,6 +84,8 @@ function backFrom(view: View): View | null {
       return view.from ? { kind: "series", id: view.from.seriesId, selectedVolume: null } : { kind: "library" };
     case "library":
       return null;
+    case "history":
+      return { kind: "library" };
     default:
       // A tab other than the first one. Back goes home rather than retracing
       // which tabs were visited in what order.
@@ -96,7 +104,6 @@ export default function App() {
   // Browsing survives leaving for a series and coming back; see `ExploreView`.
   const [browse, setBrowse] = useState<BrowseState>(emptyBrowse);
   const [shelf, setShelf] = useState<ShelfState>(emptyShelf);
-  const [showTasks, setShowTasks] = useState(false);
   // Owned here so the OS listener lives as long as the window; Settings edits it.
   const [theme, setTheme] = useTheme();
   const { tasks, active } = useTasks();
@@ -109,6 +116,15 @@ export default function App() {
   ).length;
 
   const updater = useUpdater();
+  // The one language decision in the app: every `useT()` below reads it from
+  // the provider. `App` itself is above the provider, so it translates with
+  // the resolved language directly. Decided before settings load too, so the
+  // splash and a load error already speak the system's language.
+  const language = resolveLanguage(settings?.ui_language);
+  const t = useTranslator(language);
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   // Settings gate the first screen, so nothing renders until they are known.
   useEffect(() => {
@@ -191,7 +207,7 @@ export default function App() {
       // Thumbnails are keyed by path; a different folder invalidates all of them.
       clearThumbnails();
       if (next.chapters.length === 0) {
-        setError("No images found in that folder.");
+        setError(t("app.noImages"));
         return;
       }
       setVolume(next);
@@ -201,7 +217,7 @@ export default function App() {
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [t]);
 
   const pickFolder = useCallback(async () => {
     const picked = await open({ directory: true, multiple: false });
@@ -246,7 +262,15 @@ export default function App() {
 
     // Asked once, before anything needs somewhere to go.
     if (!settings.welcomed) {
-      return <WelcomeView onDone={setSettings} onError={setError} />;
+      return (
+        <WelcomeView
+          onDone={(next, land) => {
+            setSettings(next);
+            setView({ kind: land });
+          }}
+          onError={setError}
+        />
+      );
     }
 
     // The reader takes the whole window: a rail beside a page is a rail in
@@ -267,33 +291,10 @@ export default function App() {
       return (
         <HistoryView
           onRead={(entry) =>
-            setView({
-              kind: "reader",
-              // How it was read decides where it reopens from. A streamed
-              // chapter has no pages on disk to go back to.
-              target:
-                entry.downloaded || !entry.chapter_source_id || !entry.series_source_id
-                  ? { kind: "library", seriesId: entry.series_id, chapter: entry.chapter }
-                  : {
-                      kind: "online",
-                      source: (entry.source ?? "mangadex") as MetaSource,
-                      chapterId: entry.chapter_source_id,
-                      seriesTitle: entry.series_title,
-                      chapterNumber: entry.chapter,
-                      direction: "right-to-left",
-                      // Back to the translation it was read in, not a default.
-                      language: entry.language,
-                      // Left for the reader to fetch: it needs the list anyway,
-                      // and this is the one entry point that has never had it.
-                      chapters: [],
-                      seriesSourceId: entry.series_source_id,
-                      coverUrl: null,
-                      librarySeriesId: entry.series_id,
-                    },
-              back: { kind: "history" },
-            })
+            setView({ kind: "reader", target: historyTarget(entry), back: { kind: "history" } })
           }
           onOpenSeries={(id) => setView({ kind: "series", id, selectedVolume: null })}
+          onBack={() => setView({ kind: "library" })}
           onError={setError}
         />
       );
@@ -308,26 +309,32 @@ export default function App() {
           onRead={(target) =>
             setView({ kind: "reader", target, back: { kind: "explore" } })
           }
+          onManageSources={() => setView({ kind: "settings", page: "extensions" })}
           onError={setError}
         />
       );
     }
 
-    if (view.kind === "send") {
-      return <SendView onSaved={() => {}} onError={setError} />;
-    }
-
-    if (view.kind === "extensions") {
-      return <ExtensionsView onError={setError} />;
+    if (view.kind === "tasks") {
+      return (
+        <TasksView
+          tasks={tasks}
+          onOpenDevices={() => setView({ kind: "settings", page: "devices" })}
+          onOpenExtensions={() => setView({ kind: "settings", page: "extensions" })}
+        />
+      );
     }
 
     if (view.kind === "settings") {
       return (
         <SettingsView
+          page={view.page}
+          onPageChange={(page) => setView({ kind: "settings", page })}
           onSaved={setSettings}
           onError={setError}
           updateStage={updater.state.stage}
           onCheckUpdates={updater.checkNow}
+          onWhatsNew={() => setWhatsNew(unseenChangelog(null))}
           theme={theme}
           onThemeChange={setTheme}
         />
@@ -341,6 +348,8 @@ export default function App() {
           onShelfChange={setShelf}
           onOpenSeries={(id) => setView({ kind: "series", id, selectedVolume: null })}
           onOpenFolder={() => void pickFolder()}
+          onOpenHistory={() => setView({ kind: "history" })}
+          onRead={(target) => setView({ kind: "reader", target, back: { kind: "library" } })}
           onError={setError}
           settleCount={settleCount}
         />
@@ -364,9 +373,13 @@ export default function App() {
             setVolume(built);
             setView({ kind: "editor", from: source });
           }}
-          defaultFormat={settings.default_format}
+          devices={settings.devices}
+          defaultDevice={defaultDevice(settings)}
+          onOpenDevices={() => setView({ kind: "settings", page: "devices" })}
           onError={setError}
-          onTasksChanged={() => setShowTasks(true)}
+          // The sidebar's badge says a task started; the work runs on while
+          // the user carries on here.
+          onTasksChanged={() => {}}
         />
       );
     }
@@ -417,25 +430,22 @@ export default function App() {
               }
             : undefined
         }
-        defaultFormat={settings.default_format}
+        defaultFormat={defaultDevice(settings)?.format ?? "epub"}
         onError={setError}
       />
     );
   };
 
-  // A series and the editor both sit under the library as far as navigation is
-  // concerned, so neither gets its own rail entry.
+  // A series, history and the editor all sit under the shelf as far as
+  // navigation is concerned, so none gets its own rail entry.
   const section: Section =
-    view.kind === "settings" ||
-    view.kind === "send" ||
-    view.kind === "extensions" ||
-    view.kind === "explore" ||
-    view.kind === "history"
+    view.kind === "settings" || view.kind === "explore" || view.kind === "tasks"
       ? view.kind
       : "library";
   const chrome = settings !== null && settings.welcomed && view.kind !== "reader";
 
   return (
+    <LanguageProvider value={language}>
     <TooltipProvider delayDuration={400}>
       {/* The rail sits beside the content; the phone's bar sits under it, which
           is the same two children in the other direction with the nav last. */}
@@ -443,9 +453,20 @@ export default function App() {
         {chrome && (
           <Sidebar
             active={section}
-            onNavigate={(to) => setView({ kind: to } as View)}
+            onNavigate={(to) =>
+              setView(to === "settings" ? { kind: "settings", page: "general" } : { kind: to })
+            }
+            onOpenDevices={() => setView({ kind: "settings", page: "devices" })}
+            devices={settings?.devices ?? []}
+            defaultDevice={defaultDevice(settings)}
+            onDefaultDevice={(id) =>
+              settings &&
+              void saveSettings({ ...settings, default_device: id })
+                .then(setSettings)
+                .catch((e) => setError(String(e)))
+            }
             updateStage={updater.state.stage}
-            onCheckUpdates={updater.checkNow}
+            activeTasks={active}
             variant={isMobile ? "bar" : "rail"}
           />
         )}
@@ -462,33 +483,10 @@ export default function App() {
           {body()}
         </div>
 
-        {/* Reachable from every screen, because the queue outlives all of them.
-            Hidden in the reader, which is the one place that gives up its
-            chrome on purpose. */}
-        {chrome && (tasks.length > 0 || active > 0) && (
-          <button
-            onClick={() => setShowTasks((open) => !open)}
-            title="Tasks"
-            className={cn(
-              "absolute right-3 top-3 z-40 flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur",
-              active > 0 ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {active > 0 ? (
-              <Loader2 className="size-3 animate-spin text-primary" />
-            ) : (
-              <ListChecks className="size-3" />
-            )}
-            {active > 0 ? `${active} running` : "Tasks"}
-          </button>
-        )}
-
-        {chrome && showTasks && (
-          <TaskPanel tasks={tasks} onClose={() => setShowTasks(false)} />
-        )}
-
+        {/* Not over a chapter: it sat on the reader's page scrubber, and an
+            update can wait until the reader is closed. */}
         <UpdateBanner
-          state={updater.state}
+          state={view.kind === "reader" || !settings?.welcomed ? { stage: "idle" } : updater.state}
           dismissed={updater.dismissed}
           onInstall={updater.install}
           onRestart={updater.restart}
@@ -504,7 +502,7 @@ export default function App() {
         {dragging && (
           <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="rounded-xl border-2 border-dashed border-primary px-10 py-8 text-center">
-              <p className="text-sm font-medium">Drop to open this folder</p>
+              <p className="text-sm font-medium">{t("app.dropToOpen")}</p>
             </div>
           </div>
         )}
@@ -533,5 +531,6 @@ export default function App() {
         )}
       </div>
     </TooltipProvider>
+    </LanguageProvider>
   );
 }

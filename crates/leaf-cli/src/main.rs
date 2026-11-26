@@ -120,7 +120,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Library { command } => library::run(cli.library, command),
-        Command::Sources { command } => sources::run(command),
+        Command::Sources { command } => sources::run(cli.library, command),
         Command::Scan { folder, verbose } => scan(folder, verbose),
         Command::Lookup { query, detail } => lookup(&query, detail),
         Command::Build {

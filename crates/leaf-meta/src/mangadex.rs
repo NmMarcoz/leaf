@@ -4,7 +4,7 @@
 //! shapes are deeply nested, heavily optional, and mostly discarded, so a full
 //! typed mirror would be more code to maintain for no safety we actually use.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::{
@@ -423,120 +423,6 @@ pub fn volume_chapters_in(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(volumes)
-}
-
-/// Where a chapter's images actually live.
-pub enum ChapterImages {
-    /// Served by the source. These are the page URLs.
-    Hosted(Vec<String>),
-    /// Indexed but not served, with the publisher's own page when it is known.
-    ///
-    /// `isUnavailable` in the chapter list does *not* reliably mark these — a
-    /// licensed series can report itself available and still hand back nothing.
-    /// The only dependable answer comes from asking for the pages.
-    External(Option<String>),
-}
-
-/// Ask the source for a chapter's pages.
-///
-/// The server handing out images is chosen per request and its address is only
-/// valid for a short while, so this must be called immediately before reading or
-/// downloading rather than cached.
-pub fn chapter_images(chapter_id: &str) -> Result<ChapterImages> {
-    let body = get_json(&format!("{API}/at-home/server/{chapter_id}"), &[])
-        .with_context(|| format!("asking MangaDex for chapter {chapter_id}"))?;
-
-    let base = body["baseUrl"]
-        .as_str()
-        .context("MangaDex did not return an image server")?;
-    let hash = body["chapter"]["hash"].as_str().unwrap_or_default();
-    let files: Vec<&str> = body["chapter"]["data"]
-        .as_array()
-        .map(|items| items.iter().filter_map(|f| f.as_str()).collect())
-        .unwrap_or_default();
-
-    // A chapter MangaDex indexes but does not host answers with an empty list
-    // and a success status, so the distinction has to be drawn here.
-    if hash.is_empty() || files.is_empty() {
-        return Ok(ChapterImages::External(external_url(chapter_id)));
-    }
-
-    Ok(ChapterImages::Hosted(
-        files
-            .into_iter()
-            .map(|file| format!("{base}/data/{hash}/{file}"))
-            .collect(),
-    ))
-}
-
-/// Page URLs, treating an externally hosted chapter as an error.
-///
-/// What the download path wants: there is nothing to download, and the message
-/// has to explain why rather than reporting an empty chapter.
-pub fn chapter_pages(chapter_id: &str) -> Result<Vec<String>> {
-    match chapter_images(chapter_id)? {
-        ChapterImages::Hosted(pages) => Ok(pages),
-        ChapterImages::External(url) => bail!("{}", unhosted_message(url.as_deref())),
-    }
-}
-
-/// The publisher's page for a chapter the source does not host.
-fn external_url(chapter_id: &str) -> Option<String> {
-    get_json(&format!("{API}/chapter/{chapter_id}"), &[])
-        .ok()
-        .and_then(|body| {
-            body["data"]["attributes"]["externalUrl"]
-                .as_str()
-                .map(String::from)
-        })
-}
-
-/// Explain an empty chapter in terms someone can act on.
-pub fn unhosted_message(external: Option<&str>) -> String {
-    match external {
-        Some(url) => format!(
-            "MangaDex indexes this chapter but does not host its images — it is \
-             officially licensed and published at {url}"
-        ),
-        None => "MangaDex has no images for this chapter.".to_string(),
-    }
-}
-
-/// Whether a URL is served by the MangaDex@Home network.
-///
-/// Only those get reported. Cover art comes from `uploads.mangadex.org`, which
-/// is MangaDex's own infrastructure and not part of the volunteer network.
-pub fn is_at_home(url: &str) -> bool {
-    url.contains(".mangadex.network")
-}
-
-/// Tell MangaDex how a page fetch from their network went.
-///
-/// The image servers are run by volunteers and MangaDex uses these reports to
-/// find ones that are failing or serving corrupt data. Asking a free service to
-/// stream every page of a chapter and declining to tell it whether the bytes
-/// arrived is not a reasonable trade.
-///
-/// Deliberately silent and best-effort: this is a courtesy to them, and a failed
-/// report must never interfere with the reading it describes.
-pub fn report_at_home(url: &str, success: bool, cached: bool, bytes: usize, millis: u64) {
-    if !is_at_home(url) {
-        return;
-    }
-
-    let body = serde_json::json!({
-        "url": url,
-        "success": success,
-        "cached": cached,
-        "bytes": bytes,
-        "duration": millis,
-    });
-
-    let _ = ureq::post(&format!("{API}/at-home/report"))
-        .set("User-Agent", crate::USER_AGENT)
-        .set("Content-Type", "application/json")
-        .timeout(std::time::Duration::from_secs(5))
-        .send_json(body);
 }
 
 /// Try to give a flat, volume-less chapter list — most non-MangaDex sources

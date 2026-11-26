@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Cloud,
@@ -11,7 +12,6 @@ import {
 } from "lucide-react";
 
 import { ReaderSettings } from "@/components/ReaderSettings";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useImageZoom } from "@/hooks/useImageZoom";
 import { useT } from "@/lib/i18n";
@@ -27,6 +27,8 @@ import {
   readerTrackOnline,
   savePrefs,
   saveReadingProgress,
+  STRIP_DEFAULT,
+  STRIP_MIN,
   type FitMode,
   type ReaderPrefs,
   type ReaderTarget,
@@ -135,7 +137,10 @@ export function ReaderView({
   const scroller = useRef<HTMLDivElement | null>(null);
   const saveTimer = useRef<number | null>(null);
 
-  const rtl = (prefs.direction ?? open?.direction) === "right-to-left";
+  // A vertical strip has no left or right to read from: arrows, the scrubber
+  // and the page pills run top to bottom whatever the series says.
+  const rtl =
+    prefs.mode !== "webtoon" && (prefs.direction ?? open?.direction) === "right-to-left";
   const total = open?.pages.length ?? 0;
 
   /* ------------------------------------------------------------- loading */
@@ -180,14 +185,8 @@ export function ReaderView({
       const found = await readerOnlineChapter(target.source, target.chapterId);
       if (cancelled) return;
 
-      // Not an error: the source indexes the chapter but the publisher hosts
-      // it. Nothing in the chapter list marks this reliably, so it can only be
-      // discovered by asking, and the honest response is to say where it lives.
       if (found.pages.length === 0) {
-        setFailure({
-          message: found.message ?? t("readerView.noPagesMessage"),
-          externalUrl: found.external_url,
-        });
+        setFailure({ message: t("readerView.noPagesMessage"), externalUrl: null });
         return;
       }
 
@@ -207,6 +206,22 @@ export function ReaderView({
       // Position looked up in the list each time rather than carried along, so
       // moving to a chapter produces a target that knows its own neighbours.
       const at = ordered.findIndex((c) => c.id === target.chapterId);
+      // Neighbours are by chapter *number*, not list position: a source can
+      // list one chapter several times — one entry per upload or group — and
+      // the next entry was then this same chapter again. Among the uploads of
+      // the neighbouring number, the one in the same place as this one's is
+      // preferred, which usually keeps the reader with the same group.
+      const neighbour = (step: 1 | -1): ReaderTarget | null => {
+        if (at < 0) return null;
+        const here = ordered[at].number;
+        let i = at + step;
+        while (i >= 0 && i < ordered.length && ordered[i].number === here) i += step;
+        const number = ordered[i]?.number;
+        if (number === undefined) return null;
+        const uploads = ordered.filter((c) => c.number === number);
+        const rank = ordered.filter((c) => c.number === here).findIndex((c) => c.id === target.chapterId);
+        return sibling(ordered.indexOf(uploads[rank] ?? uploads[0]));
+      };
       const sibling = (index: number): ReaderTarget | null => {
         const found = at < 0 ? undefined : ordered[index];
         return found
@@ -248,8 +263,8 @@ export function ReaderView({
         pages: found.pages,
         online: true,
         startPage: Math.min(keepPage.current ?? 0, found.pages.length - 1),
-        previous: sibling(at - 1),
-        next: sibling(at + 1),
+        previous: neighbour(-1),
+        next: neighbour(1),
         progress: seriesId ? { seriesId, chapter: target.chapterNumber } : null,
         online_source: target.seriesSourceId
           ? {
@@ -264,7 +279,14 @@ export function ReaderView({
     };
 
     run().catch((e) => {
-      if (!cancelled) setFailure({ message: String(e), externalUrl: null });
+      // A reader extension reports a chapter its site indexes but a publisher
+      // hosts as an error ending in the publisher's URL — the only channel a
+      // script has. Offering that URL as a button keeps "where it lives" one
+      // tap away whichever reader said it.
+      if (!cancelled) {
+        const message = String(e);
+        setFailure({ message, externalUrl: message.match(/https?:\/\/\S+$/)?.[0] ?? null });
+      }
     });
 
     return () => {
@@ -439,6 +461,26 @@ export function ReaderView({
       const node = event.target as HTMLElement | null;
       if (node && (node.tagName === "INPUT" || node.isContentEditable)) return;
 
+      // ctrl/cmd with + - 0 sizes the webtoon strip, as the wheel does.
+      if (prefs.mode === "webtoon" && (event.ctrlKey || event.metaKey)) {
+        const delta = event.key === "+" || event.key === "=" ? 1 : event.key === "-" ? -1 : 0;
+        if (delta || event.key === "0") {
+          event.preventDefault();
+          const room = scroller.current?.clientWidth ?? window.innerWidth;
+          setPrefs((current) => {
+            const next = {
+              ...current,
+              stripWidth: delta
+                ? clampStrip((current.stripWidth ?? STRIP_DEFAULT) * (1 + delta * STRIP_STEP), room)
+                : null,
+            };
+            savePrefs(next);
+            return next;
+          });
+          return;
+        }
+      }
+
       switch (event.key) {
         case "Escape":
           event.preventDefault();
@@ -559,7 +601,7 @@ export function ReaderView({
           setFailure({
             message: t("readerView.noChapterInLanguage", {
               number: open.number,
-              language: languageName(code),
+              language: languageName(code, t),
             }),
             externalUrl: null,
           });
@@ -597,16 +639,28 @@ export function ReaderView({
     });
   }, []);
 
+  const setStripWidth = useCallback(
+    (stripWidth: number | null) => patchPrefs({ stripWidth }),
+    [patchPrefs],
+  );
+
+  const nextTarget = open?.next ?? null;
+  const goNext = useCallback(() => {
+    if (nextTarget) onNavigate(nextTarget);
+  }, [nextTarget, onNavigate]);
+
   /* --------------------------------------------------------------- render */
 
   const surface =
     prefs.background === "white"
       ? "bg-white"
       : prefs.background === "grey"
-        ? "bg-neutral-800"
-        : "bg-black";
+        ? "bg-neutral-700"
+        : "bg-ink";
 
   const visible = useMemo(() => pagesAt(page), [pagesAt, page]);
+  // On the last page (or the last pair): what the "up next" card waits for.
+  const atEnd = total > 0 && Math.max(page, ...visible) >= total - 1;
 
   // The incoming view during a turn: the pages the overlay carries. The old
   // view stays underneath, committed and painted, until the end commits.
@@ -617,35 +671,51 @@ export function ReaderView({
   if (!open) {
     return (
       <div className={cn("relative flex h-full flex-col", surface)}>
-        <header className="flex items-center gap-3 bg-black/70 px-4 py-2.5 text-white">
-          <Button variant="ghost" size="icon" onClick={onExit} className="text-white">
-            <ArrowLeft />
-          </Button>
-          <p className="flex-1 truncate text-sm font-medium">
+        <div className={cn(PILL, "left-3 top-3 max-w-[calc(100%-1.5rem)] sm:left-6 sm:top-5")}>
+          <button
+            type="button"
+            onClick={onExit}
+            aria-label={t("readerView.goBack")}
+            className={PILL_ICON}
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <p className="truncate pl-0.5 pr-3 text-xs font-medium">
             {target.kind === "online" ? target.seriesTitle : t("readerView.openingChapter")}
           </p>
-        </header>
+        </div>
 
         <div className="flex min-h-0 flex-1 items-center justify-center p-8">
           {failure ? (
             <div className="max-w-md text-center">
               <TriangleAlert className="mx-auto size-7 text-amber-500" />
-              <h2 className="mt-3 text-sm font-medium text-white">
+              <h2 className="mt-3 text-sm font-medium text-on-ink">
                 {t("readerView.cannotReadTitle")}
               </h2>
               {/* The message ends in a publisher URL, which has no spaces in
                   it to wrap at and runs off both edges of a phone without this. */}
-              <p className="mt-1.5 break-words text-xs leading-relaxed text-white/60">
+              <p className="mt-1.5 break-words text-xs leading-relaxed text-on-ink-muted">
                 {failure.message}
               </p>
 
               <div className="mt-5 flex items-center justify-center gap-2">
-                <Button variant="outline" onClick={onExit}>
+                {/* Restyled for the ink surface: the default ink button
+                    disappears into it, and the outline one turns paper. The
+                    way onward is the paper one when there is somewhere to go. */}
+                <Button
+                  variant="ghost"
+                  onClick={onExit}
+                  className={cn(
+                    failure.externalUrl
+                      ? "bg-ink-raised text-on-ink hover:bg-ink-raised/80 hover:text-on-ink"
+                      : "bg-on-ink text-ink hover:bg-on-ink/90 hover:text-ink",
+                  )}
+                >
                   <ArrowLeft />
                   {t("readerView.goBack")}
                 </Button>
                 {failure.externalUrl && (
-                  <Button asChild>
+                  <Button asChild className="bg-on-ink text-ink hover:bg-on-ink/90">
                     <a
                       href={failure.externalUrl}
                       target="_blank"
@@ -658,7 +728,7 @@ export function ReaderView({
                 )}
               </div>
 
-              <p className="mt-4 text-[10px] text-white/35">
+              <p className="mt-4 text-[11px] text-on-ink-muted/70">
                 {isMobile ? t("readerView.backCloses") : t("readerView.escCloses")}
               </p>
             </div>
@@ -673,50 +743,69 @@ export function ReaderView({
   return (
     <div className={cn("relative flex h-full flex-col", surface)}>
       {showChrome && (
-        <header className="absolute inset-x-0 top-0 z-20 flex items-center gap-3 bg-black/70 px-4 py-2.5 text-white backdrop-blur-sm">
-          <Button variant="ghost" size="icon" onClick={onExit} className="text-white">
-            <ArrowLeft />
-          </Button>
-          {/* The title is the way to the series: from halfway through a
-              chapter, "what else is there" is a question worth one tap. */}
-          <button
-            className="min-w-0 flex-1 text-left"
-            onClick={() => open.progress && onOpenSeries(open.progress.seriesId)}
-            disabled={!open.progress}
+        <>
+          {/* Floating ink pills rather than full-width bars (Figma "13 ·
+              Leitor"): the page keeps the whole screen and the chrome only
+              covers what it labels. */}
+          <div className={cn(PILL, "left-3 top-3 max-w-[calc(100%-9.5rem)] sm:left-6 sm:top-5")}>
+            <button
+              type="button"
+              onClick={onExit}
+              aria-label={t("readerView.goBack")}
+              className={PILL_ICON}
+            >
+              <ArrowLeft className="size-4" />
+            </button>
+            {/* The title is the way to the series: from halfway through a
+                chapter, "what else is there" is a question worth one tap. */}
+            <button
+              type="button"
+              className="min-w-0 pl-0.5 pr-3 text-left text-xs leading-4"
+              onClick={() => open.progress && onOpenSeries(open.progress.seriesId)}
+              disabled={!open.progress}
+            >
+              <p className="truncate font-medium text-on-ink">{open.seriesTitle}</p>
+              <p className="flex items-center gap-1 truncate text-on-ink-muted">
+                {open.online && <Cloud className="size-3 shrink-0" aria-label={t("readerView.streaming")} />}
+                <span className="truncate">
+                  {t("readerView.chapterLabel", { number: open.number })}
+                  {open.title ? ` · ${open.title}` : ""}
+                </span>
+              </p>
+            </button>
+          </div>
+
+          <div
+            className={cn(
+              PILL,
+              "right-3 top-3 sm:top-5",
+              // Steps aside for the settings panel instead of hiding under it.
+              showSettings ? "sm:right-[376px]" : "sm:right-6",
+            )}
           >
-            <p className="truncate text-sm font-medium">{open.seriesTitle}</p>
-            <p className="truncate text-[11px] text-white/60">
-              {t("readerView.chapterLabel", { number: open.number })}
-              {open.title ? ` · ${open.title}` : ""}
-            </p>
-          </button>
-          {open.online && (
-            <Badge variant="outline" className="shrink-0 border-white/30 text-white/70">
-              <Cloud className="size-2.5" />
-              {t("readerView.streaming")}
-            </Badge>
-          )}
-          {/* A raw counter, not narrative text — left unwrapped like a clock. */}
-          <span className="shrink-0 font-mono text-xs text-white/70">
-            {page + 1} / {total}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-white"
-            onClick={() => {
-              setShowSettings((v) => !v);
-              const from = open.online_source;
-              if (from && !translations.length) {
-                void seriesTranslations(from.source, from.seriesSourceId)
-                  .then(setTranslations)
-                  .catch(() => {});
-              }
-            }}
-          >
-            <Settings2 />
-          </Button>
-        </header>
+            {/* A raw counter, not narrative text — left unwrapped like a clock. */}
+            <span className="pl-2.5 pr-1.5 font-mono text-xs text-on-ink-muted">
+              {page + 1} / {total}
+            </span>
+            <button
+              type="button"
+              aria-label={t("readerSettings.title")}
+              aria-pressed={showSettings}
+              className={cn(PILL_ICON, "bg-ink")}
+              onClick={() => {
+                setShowSettings((v) => !v);
+                const from = open.online_source;
+                if (from && !translations.length) {
+                  void seriesTranslations(from.source, from.seriesSourceId)
+                    .then(setTranslations)
+                    .catch(() => {});
+                }
+              }}
+            >
+              <Settings2 className="size-4" />
+            </button>
+          </div>
+        </>
       )}
 
       {prefs.mode === "webtoon" ? (
@@ -724,6 +813,12 @@ export function ReaderView({
           ref={scroller}
           chapter={open}
           fit={prefs.fit}
+          width={prefs.stripWidth}
+          onWidth={setStripWidth}
+          nextLabel={
+            open.next ? t("readerView.chapterLabel", { number: targetNumber(open.next) }) : null
+          }
+          onNext={goNext}
           onVisiblePage={setPage}
           onToggleChrome={() => setShowChrome((v) => !v)}
         />
@@ -849,42 +944,87 @@ export function ReaderView({
       )}
 
       {showChrome && (
-        <footer className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-3 bg-black/70 px-4 py-2.5 backdrop-blur-sm">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-white"
+        <div
+          className={cn(
+            PILL,
+            "bottom-3 left-1/2 w-[600px] max-w-[calc(100%-1.5rem)] -translate-x-1/2 gap-3 px-2.5 sm:bottom-5",
+          )}
+        >
+          <button
+            type="button"
+            aria-label={t(rtl ? "readerView.nextPage" : "readerView.previousPage")}
+            className={cn(PILL_ICON, "p-1.5")}
             onClick={() => advance(rtl ? 1 : -1)}
           >
-            {rtl ? <ChevronRight /> : <ChevronLeft />}
-          </Button>
+            <ChevronLeft className="size-4" />
+          </button>
 
-          {/* Reversed for a right-to-left book, so dragging right goes back. */}
-          <input
-            type="range"
-            min={0}
-            max={Math.max(0, total - 1)}
-            value={page}
-            onChange={(e) => jump(Number(e.target.value))}
-            className={cn(
-              "h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 accent-primary",
-              rtl && "[direction:rtl]",
-            )}
-          />
+          {/* The bar is drawn, the range input on top of it does the work:
+              a native range cannot take the design's thin track and accent
+              fill in every engine. Reversed for a right-to-left book, so the
+              fill grows from the right and dragging right goes back. */}
+          <div className="relative flex h-6 min-w-0 flex-1 items-center">
+            <div
+              className={cn(
+                "flex h-1 w-full overflow-hidden rounded-full bg-ink",
+                rtl && "justify-end",
+              )}
+            >
+              <div
+                className="h-1 rounded-full bg-deliver"
+                style={{ width: `${total > 1 ? ((page + 1) / total) * 100 : 100}%` }}
+              />
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, total - 1)}
+              value={page}
+              aria-label={t("readerView.pageSlider")}
+              onChange={(e) => jump(Number(e.target.value))}
+              className={cn(
+                "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                rtl && "[direction:rtl]",
+              )}
+            />
+          </div>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-white"
+          <button
+            type="button"
+            aria-label={t(rtl ? "readerView.previousPage" : "readerView.nextPage")}
+            className={cn(PILL_ICON, "p-1.5")}
             onClick={() => advance(rtl ? -1 : 1)}
           >
-            {rtl ? <ChevronLeft /> : <ChevronRight />}
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Figma "13b · fim do capítulo": the last page offers the next chapter
+          instead of leaving the reader to find it. Turning on from here goes
+          there too, so the card is a signpost, not a gate. Kept up with the
+          chrome hidden — that is exactly when the reader would miss it. */}
+      {atEnd && open.next && !showSettings && prefs.mode !== "webtoon" && (
+        <div className="absolute inset-x-3 bottom-[4.25rem] z-20 flex flex-col gap-2.5 rounded-2xl bg-raised p-4 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.4)] sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-60">
+          <p className="type-overline text-text-tertiary">{t("readerView.upNext")}</p>
+          <p className="type-subtitle">
+            {t("readerView.chapterLabel", { number: targetNumber(open.next) })}
+          </p>
+          {!isMobile && (
+            <p className="text-xs text-text-tertiary">
+              {t("readerView.continueHint", { arrow: rtl ? "←" : "→" })}
+            </p>
+          )}
+          <Button className="w-full" onClick={() => open.next && onNavigate(open.next)}>
+            <ChevronRight />
+            {t("readerView.continue")}
           </Button>
-        </footer>
+        </div>
       )}
 
       {showSettings && (
         <ReaderSettings
+          className="absolute inset-x-3 top-[4.25rem] z-30 w-auto sm:inset-x-auto sm:right-6 sm:top-5 sm:w-[340px]"
           prefs={prefs}
           seriesDirection={open.direction}
           translations={open.online_source ? translations : []}
@@ -897,6 +1037,18 @@ export function ReaderView({
       )}
     </div>
   );
+}
+
+/** The floating ink pill every piece of reader chrome sits in (Figma "13 · Leitor"). */
+const PILL =
+  "absolute z-20 flex items-center gap-1.5 rounded-full bg-ink-raised/95 px-2 py-1.5 text-on-ink shadow-[0_8px_24px_rgba(0,0,0,0.35)]";
+const PILL_ICON =
+  "flex shrink-0 items-center justify-center rounded-full p-2 text-on-ink transition-colors hover:bg-ink";
+
+/** The chapter number a reader target opens, for the "up next" card. */
+function targetNumber(target: ReaderTarget): string {
+  if (target.kind === "library") return target.chapter;
+  return target.chapters.find((c) => c.id === target.chapterId)?.number ?? target.chapterNumber;
 }
 
 /** Tailwind for each fit mode, shared by both layouts. */
@@ -1019,21 +1171,53 @@ function PageImage({
   );
 }
 
-/** The continuous strip a webtoon is drawn as. */
+/** One ctrl+wheel notch or ctrl +/- press resizes the strip by this much. */
+const STRIP_STEP = 0.1;
+
+/** The strip's width, clamped to what the window can show. */
+function clampStrip(width: number, room: number): number {
+  return Math.round(Math.min(Math.max(width, STRIP_MIN), Math.max(STRIP_MIN, room)));
+}
+
+/**
+ * The continuous strip a webtoon is drawn as.
+ *
+ * Zooming here resizes the whole strip, not one image: ctrl+wheel and
+ * ctrl +/- narrow it as well as widen it, so a reader can pick the size a
+ * panel is comfortable at and keep it. Per-image zoom only ever went up —
+ * its floor is the fitted size — which left no way to make a tall strip on
+ * a wide window smaller. Pinch on a phone still zooms the image under it.
+ *
+ * After the last page, a panel says what comes next and offers it. It does
+ * not go there on its own: a strip read to its end is often scrolled back up
+ * to look again, and being thrown into the next chapter for overshooting
+ * the bottom is worse than one tap.
+ */
 function WebtoonPages({
   chapter,
   fit,
+  width,
+  onWidth,
+  nextLabel,
+  onNext,
   onVisiblePage,
   onToggleChrome,
   ref,
 }: {
   chapter: OpenChapter;
   fit: FitMode;
+  width: number | null;
+  onWidth: (width: number | null) => void;
+  /** What the next chapter is called, or `null` when this is the last. */
+  nextLabel: string | null;
+  onNext: () => void;
   onVisiblePage: (page: number) => void;
   onToggleChrome: () => void;
   ref?: React.Ref<HTMLDivElement>;
 }) {
+  const t = useT();
   const container = useRef<HTMLDivElement | null>(null);
+  const strip = width ?? STRIP_DEFAULT;
 
   // Which page is being looked at, so progress reflects scrolling rather than
   // only explicit page turns.
@@ -1058,6 +1242,41 @@ function WebtoonPages({
     return () => observer.disconnect();
   }, [chapter, onVisiblePage]);
 
+  // ctrl/cmd+wheel resizes the strip. Captured on the way down so the image
+  // under the pointer never sees it and starts a zoom of its own.
+  const widthRef = useRef(strip);
+  widthRef.current = strip;
+  useEffect(() => {
+    const node = container.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const notch = Math.max(-1, Math.min(1, event.deltaY / 100));
+      onWidth(clampStrip(widthRef.current * (1 - notch * STRIP_STEP), node.clientWidth));
+    };
+    node.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => node.removeEventListener("wheel", onWheel, { capture: true });
+  }, [onWidth]);
+
+  // A strip's height follows its width, so resizing it would throw the reader
+  // pages away from where they were. The point in the middle of the screen
+  // is kept where it was, as a share of the whole strip.
+  const anchor = useRef<number | null>(null);
+  const lastWidth = useRef(strip);
+  if (lastWidth.current !== strip && container.current && anchor.current === null) {
+    const node = container.current;
+    anchor.current = (node.scrollTop + node.clientHeight / 2) / Math.max(1, node.scrollHeight);
+  }
+  useLayoutEffect(() => {
+    lastWidth.current = strip;
+    const node = container.current;
+    if (!node || anchor.current === null) return;
+    node.scrollTop = anchor.current * node.scrollHeight - node.clientHeight / 2;
+    anchor.current = null;
+  }, [strip]);
+
   return (
     <div
       ref={(node) => {
@@ -1069,10 +1288,37 @@ function WebtoonPages({
       className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center overflow-x-hidden overflow-y-auto touch-pan-y"
     >
       {chapter.pages.map((source, index) => (
-        <div key={source} data-page={index} className="w-full max-w-4xl">
+        <div key={source} data-page={index} className="w-full" style={{ maxWidth: strip }}>
           <LazyStripPage source={source} online={chapter.online} fit={fit} />
         </div>
       ))}
+
+      <div
+        className="flex min-h-[45vh] w-full shrink-0 items-center justify-center px-6 py-10"
+        style={{ maxWidth: strip }}
+      >
+        <div className="flex flex-col items-center gap-1.5 rounded-2xl bg-ink-raised px-8 py-6 text-center text-on-ink">
+        {nextLabel ? (
+          <>
+            <p className="type-overline text-on-ink-muted">{t("readerView.upNext")}</p>
+            <p className="type-subtitle">{nextLabel}</p>
+            <Button
+              variant="secondary"
+              className="mt-2"
+              onClick={(event) => {
+                event.stopPropagation();
+                onNext();
+              }}
+            >
+              <ChevronDown />
+              {t("readerView.continue")}
+            </Button>
+          </>
+        ) : (
+          <p className="text-sm text-on-ink-muted">{t("readerView.lastChapter")}</p>
+        )}
+        </div>
+      </div>
     </div>
   );
 }
