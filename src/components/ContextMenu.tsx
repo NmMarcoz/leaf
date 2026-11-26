@@ -61,7 +61,7 @@ export function ContextMenu({ at, onClose, children }: ContextMenuProps) {
     <div
       ref={ref}
       style={{ left: position.x, top: position.y }}
-      className="fixed z-50 flex min-w-56 flex-col overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+      className="fixed z-50 flex min-w-56 flex-col overflow-hidden rounded-xl border border-line bg-raised p-1 text-foreground shadow-xl"
       onContextMenu={(e) => e.preventDefault()}
     >
       {children}
@@ -86,18 +86,18 @@ export function ContextMenuItem({
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        "flex h-8 w-full shrink-0 items-center gap-3 rounded-md px-2.5 text-left text-xs transition-colors",
+        "flex h-9 w-full shrink-0 items-center gap-3 rounded-lg px-3 text-left text-sm transition-colors",
         disabled
           ? "cursor-not-allowed opacity-45"
-          : "hover:bg-accent hover:text-accent-foreground",
+          : "hover:bg-hover",
       )}
     >
       <span className="flex-1 truncate">{children}</span>
-      {hint && <span className="shrink-0 text-[10px] text-muted-foreground">{hint}</span>}
+      {hint && <span className="shrink-0 font-mono text-[11px] text-text-tertiary">{hint}</span>}
     </button>
   );
 }
 
 export function ContextMenuSeparator() {
-  return <div className="-mx-1 my-1 h-px shrink-0 bg-border" />;
+  return <div className="-mx-1 my-1 h-px shrink-0 bg-line" />;
 }

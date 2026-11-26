@@ -13,11 +13,11 @@ export const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
   <DialogPrimitive.Portal>
-    <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+    <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[#14161b]/45 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-3rem)] w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-3rem)] w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-line bg-raised text-popover-foreground shadow-2xl duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
       {...props}
@@ -67,7 +67,7 @@ export function DialogFooter({
 }: React.HTMLAttributes<HTMLDivElement> & { hint?: React.ReactNode; error?: React.ReactNode }) {
   return (
     <div
-      className={cn("flex shrink-0 items-center gap-2 border-t border-border px-6 pb-5 pt-4", className)}
+      className={cn("flex shrink-0 items-center gap-2 border-t border-line bg-canvas px-6 py-4", className)}
       {...props}
     >
       <div className="min-w-0 flex-1">
@@ -75,9 +75,11 @@ export function DialogFooter({
           <p className="truncate text-[11px] text-destructive" title={typeof error === "string" ? error : undefined}>
             {error}
           </p>
-        ) : hint ? (
+        ) : typeof hint === "string" ? (
           <p className="truncate text-[11px] text-muted-foreground">{hint}</p>
-        ) : null}
+        ) : (
+          hint ?? null
+        )}
       </div>
       {children}
     </div>
@@ -90,7 +92,7 @@ export const DialogTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-base font-semibold leading-6", className)}
+    className={cn("type-title", className)}
     {...props}
   />
 ));

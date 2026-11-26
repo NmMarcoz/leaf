@@ -5,25 +5,28 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
+    // The v2 button (Figma "v2/Button"): `default` is the screen's main action
+    // in ink, `deliver` is reserved for sending a volume to a device, and
+    // `outline` (Figma "Secondary") / `ghost` are everything else.
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        default: "bg-strong text-on-strong hover:bg-strong-hover active:bg-strong-pressed",
+        deliver: "bg-deliver text-on-deliver hover:bg-deliver-hover active:bg-deliver-pressed",
+        destructive: "bg-danger text-on-deliver hover:bg-danger/90",
         outline:
-          "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+          "border border-line-strong bg-raised text-foreground hover:bg-hover active:bg-pressed",
+        secondary: "bg-sunken text-foreground hover:bg-hover active:bg-pressed",
+        ghost: "text-foreground hover:bg-hover active:bg-pressed",
+        link: "text-info underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-9 px-4 py-2",
+        default: "h-[38px] px-4",
         sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-6",
-        icon: "h-9 w-9",
-        "icon-sm": "h-7 w-7 rounded-md",
+        lg: "h-11 px-6",
+        icon: "size-[38px]",
+        "icon-sm": "size-7 rounded-md",
       },
     },
     // A link sits inline with body text, so side padding would only indent it

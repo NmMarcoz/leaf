@@ -238,8 +238,9 @@ export const libraryDownloadCovers = (id: number) =>
 export const librarySetVolumeCover = (id: number, volume: string, path: string) =>
   invoke<string>("library_set_volume_cover", { id, volume, path });
 
-export const libraryBuildVolume = (id: number, volume: string) =>
-  invoke<Volume>("library_build_volume", { id, volume });
+/** `device` decides whether spreads come out split; `null` = the default device. */
+export const libraryBuildVolume = (id: number, volume: string, device: string | null = null) =>
+  invoke<Volume>("library_build_volume", { id, volume, device });
 
 export const libraryDeleteChapter = (id: number, chapter: string) =>
   invoke<ChapterStatus>("library_delete_chapter", { id, chapter });

@@ -429,10 +429,12 @@ export function EditorView({
   const pickCover = useCallback(async () => {
     const picked = await open({
       multiple: false,
-      filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "avif"] }],
+      filters: [
+        { name: t("editorView.imagesFilter"), extensions: ["jpg", "jpeg", "png", "webp", "avif"] },
+      ],
     });
     if (typeof picked === "string") setCover(picked);
-  }, [setCover]);
+  }, [setCover, t]);
 
   return (
     <>

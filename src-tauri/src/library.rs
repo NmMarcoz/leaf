@@ -382,11 +382,12 @@ pub async fn library_build_volume(
     app: AppHandle,
     id: i64,
     volume: String,
+    device: Option<String>,
 ) -> Result<Volume, String> {
     blocking(move || {
         let settings = settings::load(&app)?;
         let mut built = Library::open(&settings.library_root)?.build_volume(SeriesId(id), &volume)?;
-        apply_spread_policy(&mut built, settings.split_spreads);
+        apply_spread_policy(&mut built, settings::profile(&settings, device.as_deref()).split_spreads);
         Ok(built)
     })
     .await
@@ -452,9 +453,11 @@ pub async fn build_library_volumes(
     volumes: Vec<String>,
     format: Format,
     out_dir: Option<String>,
-    // Mail each volume to the configured device once it is written. One job
-    // rather than something the user has to come back and finish by hand.
+    // Send each volume to the device once it is written. One job rather than
+    // something the user has to come back and finish by hand.
     deliver: bool,
+    // The device to build for and send to; `None` is the default one.
+    device: Option<String>,
 ) -> Result<u64, String> {
     let title = {
         let settings = settings::load(&app).map_err(|e| e.to_string())?;
@@ -481,8 +484,8 @@ pub async fn build_library_volumes(
             format,
             root: &root,
             folder_per_series: settings.folder_per_series,
-            split_spreads: settings.split_spreads,
-            write: settings::write_options(&settings),
+            split_spreads: settings::profile(&settings, device.as_deref()).split_spreads,
+            write: settings::write_options(&settings, device.as_deref()),
         };
 
         let mut built = Vec::new();
@@ -528,7 +531,7 @@ pub async fn build_library_volumes(
         if deliver && !built.is_empty() && !progress.cancelled() {
             progress.step("sending", total as u32, total as u32);
             let paths: Vec<String> = built.iter().map(|b| b.path.clone()).collect();
-            match crate::send::deliver_all(&app, &paths) {
+            match crate::send::deliver_all(&app, device.as_deref(), &paths) {
                 Ok(report) => {
                     summary.push_str(&format!(", {} sent", report.sent.len()));
                     if !report.failed.is_empty() {

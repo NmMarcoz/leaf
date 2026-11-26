@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT } from "@/lib/i18n";
+import type { Translator } from "@/lib/i18n/types";
 import type { Series } from "@/lib/library";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +40,28 @@ export const isFiltering = (f: LibraryFilter) =>
 /** Content ratings, mildest first — the same four MangaDex publishes. */
 const RATINGS = ["safe", "suggestive", "erotica", "pornographic"];
 
+const RATING_KEYS: Record<string, string> = {
+  safe: "libraryFilters.ratingSafe",
+  suggestive: "libraryFilters.ratingSuggestive",
+  erotica: "libraryFilters.ratingErotica",
+  pornographic: "libraryFilters.ratingPornographic",
+};
+
+const STATUS_KEYS: Record<string, string> = {
+  ongoing: "libraryFilters.statusOngoing",
+  completed: "libraryFilters.statusCompleted",
+  hiatus: "libraryFilters.statusHiatus",
+  cancelled: "libraryFilters.statusCancelled",
+};
+
+/** These values come from the metadata source, so one this build has no
+ * string for is shown as it arrived rather than hidden. */
+export const ratingLabel = (t: Translator, rating: string) =>
+  RATING_KEYS[rating] ? t(RATING_KEYS[rating]) : rating;
+
+export const statusLabel = (t: Translator, status: string) =>
+  STATUS_KEYS[status] ? t(STATUS_KEYS[status]) : status;
+
 /** Does this series pass? */
 export function matches(series: Series, f: LibraryFilter): boolean {
   if (f.tags.some((t) => !series.tags.includes(t))) return false;
@@ -55,16 +79,18 @@ export function matches(series: Series, f: LibraryFilter): boolean {
  * first tag the filter asked for, falling back to the series' own first. That
  * makes "filter to Action, group by tag" mean what it looks like it means.
  */
-export function sectionOf(series: Series, f: LibraryFilter): string {
+export function sectionOf(series: Series, f: LibraryFilter, t: Translator): string {
   switch (f.group) {
     case "tag": {
       const preferred = f.tags.find((t) => series.tags.includes(t));
-      return preferred ?? series.tags[0] ?? "Untagged";
+      return preferred ?? series.tags[0] ?? t("libraryFilters.untagged");
     }
     case "rating":
-      return series.content_rating ?? "Unrated";
+      return series.content_rating
+        ? ratingLabel(t, series.content_rating)
+        : t("libraryFilters.unrated");
     case "status":
-      return series.status ?? "Unknown";
+      return series.status ? statusLabel(t, series.status) : t("libraryFilters.unknown");
     default:
       return "";
   }
@@ -85,6 +111,7 @@ interface LibraryFiltersProps {
  * MangaDex has a few hundred of them.
  */
 export function LibraryFilters({ filter, onChange, series }: LibraryFiltersProps) {
+  const t = useT();
   const tags = useMemo(() => {
     const counts = new Map<string, number>();
     for (const s of series) {
@@ -125,10 +152,10 @@ export function LibraryFilters({ filter, onChange, series }: LibraryFiltersProps
   return (
     <div className="flex shrink-0 flex-col gap-2 border-b border-border bg-card/30 px-4 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">Tags</span>
+        <span className="text-[11px] font-medium text-muted-foreground">{t("libraryFilters.tags")}</span>
         {tags.length === 0 ? (
           <span className="text-[11px] text-muted-foreground">
-            None recorded yet — re-add or refresh a series to pull them.
+            {t("libraryFilters.noTags")}
           </span>
         ) : (
           // Scrolled rather than wrapped to twenty rows: a big library has a lot
@@ -151,14 +178,14 @@ export function LibraryFilters({ filter, onChange, series }: LibraryFiltersProps
       <div className="flex flex-wrap items-center gap-3">
         {ratings.length > 0 && (
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-medium text-muted-foreground">Rating</span>
+            <span className="text-[11px] font-medium text-muted-foreground">{t("libraryFilters.rating")}</span>
             {ratings.map((rating) => (
               <button key={rating} onClick={() => toggleRating(rating)}>
                 <Badge
                   variant={filter.ratings.includes(rating) ? "default" : "outline"}
                   className="cursor-pointer"
                 >
-                  {rating}
+                  {ratingLabel(t, rating)}
                 </Badge>
               </button>
             ))}
@@ -174,10 +201,10 @@ export function LibraryFilters({ filter, onChange, series }: LibraryFiltersProps
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="any">Any status</SelectItem>
+              <SelectItem value="any">{t("libraryFilters.anyStatus")}</SelectItem>
               {statuses.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s}
+                  {statusLabel(t, s)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -192,10 +219,10 @@ export function LibraryFilters({ filter, onChange, series }: LibraryFiltersProps
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">No grouping</SelectItem>
-            <SelectItem value="tag">Group by tag</SelectItem>
-            <SelectItem value="rating">Group by rating</SelectItem>
-            <SelectItem value="status">Group by status</SelectItem>
+            <SelectItem value="none">{t("libraryFilters.noGrouping")}</SelectItem>
+            <SelectItem value="tag">{t("libraryFilters.groupByTag")}</SelectItem>
+            <SelectItem value="rating">{t("libraryFilters.groupByRating")}</SelectItem>
+            <SelectItem value="status">{t("libraryFilters.groupByStatus")}</SelectItem>
           </SelectContent>
         </Select>
 
@@ -206,7 +233,7 @@ export function LibraryFilters({ filter, onChange, series }: LibraryFiltersProps
             onClick={() => onChange({ ...noFilter(), group: filter.group })}
           >
             <X />
-            Clear
+            {t("libraryFilters.clear")}
           </Button>
         )}
       </div>

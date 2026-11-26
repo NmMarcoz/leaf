@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/lib/i18n";
 import { libraryRemoveSeries, type Series } from "@/lib/library";
 
 interface RemoveSeriesDialogProps {
@@ -35,6 +36,7 @@ export function RemoveSeriesDialog({
   onOpenChange,
   onRemoved,
 }: RemoveSeriesDialogProps) {
+  const t = useT();
   const [deleteFiles, setDeleteFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,11 +78,16 @@ export function RemoveSeriesDialog({
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Remove {series?.title}?</DialogTitle>
+          <DialogTitle>{t("removeSeriesDialog.title", { title: series?.title ?? "" })}</DialogTitle>
           <DialogDescription>
-            {downloaded > 0
-              ? `${downloaded} downloaded ${downloaded === 1 ? "chapter" : "chapters"} on disk.`
-              : "Nothing has been downloaded for this series yet."}
+            {downloaded === 0
+              ? t("removeSeriesDialog.nothingDownloaded")
+              : t(
+                  downloaded === 1
+                    ? "removeSeriesDialog.downloadedChaptersOne"
+                    : "removeSeriesDialog.downloadedChaptersOther",
+                  { count: downloaded },
+                )}
           </DialogDescription>
         </DialogHeader>
 
@@ -94,10 +101,9 @@ export function RemoveSeriesDialog({
                 className="mt-0.5"
               />
               <span className="text-xs">
-                <span className="font-medium">Delete the downloaded files too</span>
+                <span className="font-medium">{t("removeSeriesDialog.deleteFiles")}</span>
                 <span className="mt-0.5 block leading-relaxed text-muted-foreground">
-                  Permanently removes the chapter images from disk. Anything you
-                  have already exported is untouched.
+                  {t("removeSeriesDialog.deleteFilesHint")}
                 </span>
               </span>
             </label>
@@ -105,19 +111,22 @@ export function RemoveSeriesDialog({
 
           {deleteFiles ? (
             <Callout tone="destructive">
-              The series and its files will be deleted from {folder}. This cannot
-              be undone.
+              {t("removeSeriesDialog.deleteNoticeDeletePrefix")}
+              {folder}
+              {t("removeSeriesDialog.deleteNoticeDeleteSuffix")}
             </Callout>
           ) : (
             <Callout tone="info">
-              Only the library entry goes. The files stay in {folder}.
+              {t("removeSeriesDialog.deleteNoticeKeepPrefix")}
+              {folder}
+              {t("removeSeriesDialog.deleteNoticeKeepSuffix")}
             </Callout>
           )}
         </DialogBody>
 
         <DialogFooter error={error}>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+            {t("removeSeriesDialog.cancel")}
           </Button>
           <Button
             variant={deleteFiles ? "destructive" : "default"}
@@ -125,7 +134,9 @@ export function RemoveSeriesDialog({
             disabled={busy}
           >
             {busy ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            {deleteFiles ? "Delete series and files" : "Remove from library"}
+            {deleteFiles
+              ? t("removeSeriesDialog.deleteSeriesAndFiles")
+              : t("removeSeriesDialog.removeFromLibrary")}
           </Button>
         </DialogFooter>
       </DialogContent>

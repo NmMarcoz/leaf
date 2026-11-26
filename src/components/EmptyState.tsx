@@ -1,6 +1,7 @@
 import { FolderOpen, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 interface EmptyStateProps {
@@ -11,6 +12,7 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ dragging, scanning, error, onOpenFolder }: EmptyStateProps) {
+  const t = useT();
   return (
     <div className="flex h-full items-center justify-center p-10">
       <div
@@ -22,7 +24,7 @@ export function EmptyState({ dragging, scanning, error, onOpenFolder }: EmptySta
         {scanning ? (
           <>
             <Loader2 className="size-9 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Reading pages…</p>
+            <p className="text-sm text-muted-foreground">{t("emptyState.readingPages")}</p>
           </>
         ) : (
           <>
@@ -30,14 +32,13 @@ export function EmptyState({ dragging, scanning, error, onOpenFolder }: EmptySta
               <FolderOpen className="size-8 text-primary" />
             </div>
             <div className="space-y-1.5">
-              <h2 className="text-lg font-semibold">Drop a volume folder</h2>
+              <h2 className="text-lg font-semibold">{t("emptyState.title")}</h2>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                One subfolder per chapter, images inside. Banners, favicons and
-                other site junk are filtered out automatically.
+                {t("emptyState.description")}
               </p>
             </div>
             <Button onClick={onOpenFolder}>
-              <FolderOpen /> Choose folder
+              <FolderOpen /> {t("emptyState.chooseFolder")}
             </Button>
             {error && (
               <p className="text-xs text-destructive" data-selectable>

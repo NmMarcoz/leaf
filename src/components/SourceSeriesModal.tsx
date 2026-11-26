@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookOpen, Check, Cloud, Download, Loader2, Plus } from "lucide-react";
 
 import { RemoteImage } from "@/components/RemoteImage";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetBody, SheetFooter, SheetHeader, SheetStat } from "@/components/ui/sheet";
+import { ratingLabel } from "@/components/LibraryFilters";
 import { Hint } from "@/components/ui/tooltip";
 import { useT } from "@/lib/i18n";
 import {
@@ -22,11 +21,12 @@ import {
   type Series,
 } from "@/lib/library";
 import type { ReaderTarget } from "@/lib/reader";
-import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
 interface SourceSeriesModalProps {
   source: string;
+  /** What the extension calls itself, for the header's overline. */
+  sourceName: string;
   manga: SourceManga;
   /** The library entry, when this series has already been added. */
   owned: Series | null;
@@ -47,6 +47,7 @@ interface SourceSeriesModalProps {
  */
 export function SourceSeriesModal({
   source,
+  sourceName,
   manga,
   owned,
   onClose,
@@ -156,128 +157,125 @@ export function SourceSeriesModal({
     .filter((alt) => alt && alt !== title)
     .join(" · ");
 
+  const readable = flat.filter((c) => c.id && !c.unavailable);
+  const firstReadable = readable[0] ?? null;
+  const volumeCount = (layout ?? []).filter((v) => v.volume && v.volume !== "none").length;
+  const cover = details?.cover_url ?? manga.cover_url;
+
   return (
-    <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[88dvh] max-w-4xl">
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-          <div className={cn("flex gap-6 p-6", isMobile && "flex-col gap-4")}>
-            <div
-              className={cn(
-                "flex items-center justify-center overflow-hidden rounded-lg bg-muted/40",
-                isMobile ? "h-52 w-36 self-start" : "h-[228px] w-40 shrink-0",
-              )}
-            >
-              {(details?.cover_url ?? manga.cover_url) ? (
-                <RemoteImage
-                  url={(details?.cover_url ?? manga.cover_url)!}
-                  max={512}
-                  className="h-full w-full"
-                />
-              ) : (
-                <BookOpen className="size-6 text-muted-foreground" />
-              )}
+    <Sheet open onClose={onClose} title={title}>
+      <SheetHeader
+        closeLabel={t("sourceSeriesModal.close")}
+        cover={
+          cover ? (
+            <RemoteImage url={cover} max={512} className="h-full w-full" />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <BookOpen className="size-6 text-on-ink-muted" />
             </div>
+          )
+        }
+        overline={t("sourceSeriesModal.overline", { source: sourceName })}
+        title={title}
+        byline={[
+          details?.author ?? t("sourceSeriesModal.unknownAuthor"),
+          details?.artist && details.artist !== details.author ? details.artist : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      />
 
-            <div className="flex min-w-0 flex-1 flex-col gap-3 pr-8">
-              <div className="flex flex-col gap-1">
-                <DialogTitle className="leading-tight">{title}</DialogTitle>
-                {altTitles && <p className="text-[11px] text-muted-foreground">{altTitles}</p>}
-              </div>
+      <SheetBody>
+        <div className="flex gap-2">
+          <SheetStat value={layout === null ? "…" : volumeCount} label={t("sourceSeriesModal.statVolumes")} />
+          <SheetStat value={layout === null ? "…" : flat.length} label={t("sourceSeriesModal.statChapters")} />
+          <SheetStat value={layout === null ? "…" : readable.length} label={t("sourceSeriesModal.statReadable")} />
+        </div>
 
-              <p className="text-xs text-muted-foreground">
-                {details?.author ?? t("sourceSeriesModal.unknownAuthor")}
-                {details?.artist && details.artist !== details.author && ` · ${details.artist}`}
-              </p>
+        {altTitles && <p className="-mt-1 text-xs text-text-tertiary">{altTitles}</p>}
 
-              {details?.content_rating && (
-                <Badge
-                  variant={details.content_rating === "safe" ? "outline" : "default"}
-                  className="w-fit capitalize"
-                >
-                  {details.content_rating}
-                </Badge>
-              )}
+        {details?.description && (
+          <p className="line-clamp-6 text-sm leading-5 text-text-secondary">{details.description}</p>
+        )}
 
-              {details && details.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {details.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="font-normal">
-                      {tag}
-                    </Badge>
+        {details && (details.tags.length > 0 || details.content_rating) && (
+          <div className="flex flex-wrap gap-1.5">
+            {details.content_rating && details.content_rating !== "safe" && (
+              <span className="rounded-full bg-warning-soft px-2.5 py-1 text-xs font-medium text-warning">
+                {ratingLabel(t, details.content_rating)}
+              </span>
+            )}
+            {details.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full border border-line px-2.5 py-1 text-xs font-medium text-text-secondary"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <section className="flex flex-col gap-2">
+          <h3 className="type-overline">{t("sourceSeriesModal.chapters")}</h3>
+          {layout === null ? (
+            <p className="flex items-center gap-2 py-2 text-xs text-text-secondary">
+              <Loader2 className="size-3.5 animate-spin" /> {t("sourceSeriesModal.loadingChapters")}
+            </p>
+          ) : flat.length === 0 ? (
+            <p className="py-2 text-xs text-text-secondary">{t("sourceSeriesModal.noChapters")}</p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto rounded-xl border border-line">
+              {layout.map((volume) => (
+                <div key={volume.volume}>
+                  <p className="sticky top-0 z-10 bg-sunken px-3.5 py-1.5 text-[11px] font-medium text-text-secondary">
+                    {t("sourceSeriesModal.volumeHeading", {
+                      number: volume.volume,
+                      count: volume.chapters.length,
+                    })}
+                  </p>
+                  {volume.chapters.map((chapter) => (
+                    <ChapterRow
+                      key={`${volume.volume}-${chapter.number}`}
+                      chapter={chapter}
+                      busy={fetching === chapter.number}
+                      onRead={() => readChapter(chapter)}
+                      onGet={() => void getChapter(chapter)}
+                    />
                   ))}
                 </div>
-              )}
-
-              {details?.description && (
-                <p className="line-clamp-4 text-xs leading-relaxed text-muted-foreground">
-                  {details.description}
-                </p>
-              )}
+              ))}
             </div>
-          </div>
+          )}
+        </section>
+      </SheetBody>
 
-          <Separator />
-
-          <div
-            className={cn(
-              "gap-4 px-6 py-4",
-              isMobile ? "flex flex-col items-stretch" : "flex items-center",
-            )}
-          >
-            <p className="flex-1 text-[11px] text-muted-foreground">
-              {layout && t("sourceSeriesModal.chaptersCount", { count: flat.length })}
-            </p>
-
-            {owned ? (
-              <Button variant="outline" onClick={() => onOpenSeries(owned.id)}>
-                <Check />
-                {t("sourceSeriesModal.inLibrary")}
-              </Button>
-            ) : (
-              <Button onClick={() => void add()} disabled={adding}>
-                {adding ? <Loader2 className="animate-spin" /> : <Plus />}
-                {t("sourceSeriesModal.addToLibrary")}
-              </Button>
-            )}
-          </div>
-
-          <div className="px-6 pb-6">
-            {layout === null ? (
-              <p className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />{" "}
-                {t("sourceSeriesModal.loadingChapters")}
-              </p>
-            ) : flat.length === 0 ? (
-              <p className="py-4 text-xs text-muted-foreground">
-                {t("sourceSeriesModal.noChapters")}
-              </p>
-            ) : (
-              <div className="-mx-6 max-h-80 overflow-y-auto border-y border-border">
-                {layout.map((volume) => (
-                  <div key={volume.volume}>
-                    <p className="sticky top-0 z-10 bg-muted px-6 py-2 text-[10px] font-medium text-muted-foreground">
-                      {t("sourceSeriesModal.volumeHeading", {
-                        number: volume.volume,
-                        count: volume.chapters.length,
-                      })}
-                    </p>
-                    {volume.chapters.map((chapter) => (
-                      <ChapterRow
-                        key={`${volume.volume}-${chapter.number}`}
-                        chapter={chapter}
-                        busy={fetching === chapter.number}
-                        onRead={() => readChapter(chapter)}
-                        onGet={() => void getChapter(chapter)}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+      <SheetFooter>
+        {owned ? (
+          <Button className="w-full" onClick={() => onOpenSeries(owned.id)}>
+            <Check />
+            {t("sourceSeriesModal.openOnShelf")}
+          </Button>
+        ) : (
+          <Button className="w-full" onClick={() => void add()} disabled={adding}>
+            {adding ? <Loader2 className="animate-spin" /> : <Plus />}
+            {t("sourceSeriesModal.addToLibrary")}
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          className="w-full"
+          disabled={!firstReadable}
+          onClick={() => firstReadable && readChapter(firstReadable)}
+        >
+          <BookOpen />
+          {firstReadable
+            ? t("sourceSeriesModal.readChapter", { number: firstReadable.number })
+            : t("sourceSeriesModal.nothingToRead")}
+        </Button>
+        {!owned && <p className="text-xs text-text-tertiary">{t("sourceSeriesModal.addHint")}</p>}
+      </SheetFooter>
+    </Sheet>
   );
 }
 
@@ -298,14 +296,14 @@ function ChapterRow({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 border-b border-border px-6 py-2 last:border-b-0",
-        !fetchable && "bg-amber-500/5",
+        "flex items-center gap-3 border-b border-line px-3.5 py-1.5 last:border-b-0",
+        !fetchable && "bg-warning-soft/40",
       )}
     >
       <span className="min-w-0 flex-1 truncate text-xs font-medium">
         {t("sourceSeriesModal.chapterTitle", { number: chapter.number })}
         {!fetchable && (
-          <span className="ml-2 text-[11px] font-normal text-amber-500">
+          <span className="ml-2 text-[11px] font-normal text-warning">
             {t("sourceSeriesModal.notHosted")}
           </span>
         )}
