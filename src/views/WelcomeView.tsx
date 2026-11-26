@@ -251,18 +251,24 @@ function FolderStep({
       </div>
 
       <div className="mt-6 flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-text-secondary">{t("welcomeView.libraryFolder")}</span>
-        <div className="flex items-center gap-2">
-          <span className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-line-strong bg-raised px-3 py-2.5">
-            <FolderOpen className="size-4 shrink-0 text-text-secondary" />
-            <span className="truncate font-mono text-xs">{folder ?? "…"}</span>
-          </span>
-          {canPickFolders && (
-            <Button variant="secondary" onClick={onPick} disabled={busy}>
-              {t("welcomeView.choose")}
-            </Button>
-          )}
-        </div>
+        {/* On a phone the library sits in app-private storage: a path the
+            user can neither open nor change, so only the output is shown. */}
+        {canPickFolders && (
+          <>
+            <span className="text-xs font-medium text-text-secondary">
+              {t("welcomeView.libraryFolder")}
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-line-strong bg-raised px-3 py-2.5">
+                <FolderOpen className="size-4 shrink-0 text-text-secondary" />
+                <span className="truncate font-mono text-xs">{folder ?? "…"}</span>
+              </span>
+              <Button variant="secondary" onClick={onPick} disabled={busy}>
+                {t("welcomeView.choose")}
+              </Button>
+            </div>
+          </>
+        )}
         {output && (
           <p className="text-xs text-text-tertiary">
             {t("welcomeView.buildsGoTo")} <span className="break-all font-mono">{output}</span>

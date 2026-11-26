@@ -509,8 +509,10 @@ function Availability({
       )}
       <p>
         {all
-          ? volumes > 0
+          ? volumes > 1
             ? t("seriesModal.availableAll", { count: total, language, source, volumes })
+            : volumes === 1
+              ? t("seriesModal.availableAllOneVolume", { count: total, language, source })
             : t("seriesModal.availableAllNoVolumes", { count: total, language, source })
           : readable === 0
             ? t("seriesModal.availableNone", { source })

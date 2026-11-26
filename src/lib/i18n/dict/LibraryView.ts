@@ -4,6 +4,7 @@ const dict: PartialDictionary = {
   en: {
     "libraryView.title": "Shelf",
     "libraryView.subtitle": "{series} series · {have} of {known} chapters on disk",
+    "libraryView.subtitleOne": "1 series · {have} of {known} chapters on disk",
     "libraryView.searchPlaceholder": "Search the shelf",
     "libraryView.buildFromFolderHint": "Build a volume from a folder instead",
     "libraryView.filters": "Tags and rating",
@@ -36,6 +37,7 @@ const dict: PartialDictionary = {
   "pt-BR": {
     "libraryView.title": "Estante",
     "libraryView.subtitle": "{series} séries · {have} de {known} capítulos no disco",
+    "libraryView.subtitleOne": "1 série · {have} de {known} capítulos no disco",
     "libraryView.searchPlaceholder": "Buscar na estante",
     "libraryView.buildFromFolderHint": "Gerar um volume a partir de uma pasta",
     "libraryView.filters": "Tags e classificação",
