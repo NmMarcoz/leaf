@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Cloud,
@@ -26,6 +27,8 @@ import {
   readerTrackOnline,
   savePrefs,
   saveReadingProgress,
+  STRIP_DEFAULT,
+  STRIP_MIN,
   type FitMode,
   type ReaderPrefs,
   type ReaderTarget,
@@ -134,7 +137,10 @@ export function ReaderView({
   const scroller = useRef<HTMLDivElement | null>(null);
   const saveTimer = useRef<number | null>(null);
 
-  const rtl = (prefs.direction ?? open?.direction) === "right-to-left";
+  // A vertical strip has no left or right to read from: arrows, the scrubber
+  // and the page pills run top to bottom whatever the series says.
+  const rtl =
+    prefs.mode !== "webtoon" && (prefs.direction ?? open?.direction) === "right-to-left";
   const total = open?.pages.length ?? 0;
 
   /* ------------------------------------------------------------- loading */
@@ -200,6 +206,22 @@ export function ReaderView({
       // Position looked up in the list each time rather than carried along, so
       // moving to a chapter produces a target that knows its own neighbours.
       const at = ordered.findIndex((c) => c.id === target.chapterId);
+      // Neighbours are by chapter *number*, not list position: a source can
+      // list one chapter several times — one entry per upload or group — and
+      // the next entry was then this same chapter again. Among the uploads of
+      // the neighbouring number, the one in the same place as this one's is
+      // preferred, which usually keeps the reader with the same group.
+      const neighbour = (step: 1 | -1): ReaderTarget | null => {
+        if (at < 0) return null;
+        const here = ordered[at].number;
+        let i = at + step;
+        while (i >= 0 && i < ordered.length && ordered[i].number === here) i += step;
+        const number = ordered[i]?.number;
+        if (number === undefined) return null;
+        const uploads = ordered.filter((c) => c.number === number);
+        const rank = ordered.filter((c) => c.number === here).findIndex((c) => c.id === target.chapterId);
+        return sibling(ordered.indexOf(uploads[rank] ?? uploads[0]));
+      };
       const sibling = (index: number): ReaderTarget | null => {
         const found = at < 0 ? undefined : ordered[index];
         return found
@@ -241,8 +263,8 @@ export function ReaderView({
         pages: found.pages,
         online: true,
         startPage: Math.min(keepPage.current ?? 0, found.pages.length - 1),
-        previous: sibling(at - 1),
-        next: sibling(at + 1),
+        previous: neighbour(-1),
+        next: neighbour(1),
         progress: seriesId ? { seriesId, chapter: target.chapterNumber } : null,
         online_source: target.seriesSourceId
           ? {
@@ -439,6 +461,26 @@ export function ReaderView({
       const node = event.target as HTMLElement | null;
       if (node && (node.tagName === "INPUT" || node.isContentEditable)) return;
 
+      // ctrl/cmd with + - 0 sizes the webtoon strip, as the wheel does.
+      if (prefs.mode === "webtoon" && (event.ctrlKey || event.metaKey)) {
+        const delta = event.key === "+" || event.key === "=" ? 1 : event.key === "-" ? -1 : 0;
+        if (delta || event.key === "0") {
+          event.preventDefault();
+          const room = scroller.current?.clientWidth ?? window.innerWidth;
+          setPrefs((current) => {
+            const next = {
+              ...current,
+              stripWidth: delta
+                ? clampStrip((current.stripWidth ?? STRIP_DEFAULT) * (1 + delta * STRIP_STEP), room)
+                : null,
+            };
+            savePrefs(next);
+            return next;
+          });
+          return;
+        }
+      }
+
       switch (event.key) {
         case "Escape":
           event.preventDefault();
@@ -596,6 +638,16 @@ export function ReaderView({
       return next;
     });
   }, []);
+
+  const setStripWidth = useCallback(
+    (stripWidth: number | null) => patchPrefs({ stripWidth }),
+    [patchPrefs],
+  );
+
+  const nextTarget = open?.next ?? null;
+  const goNext = useCallback(() => {
+    if (nextTarget) onNavigate(nextTarget);
+  }, [nextTarget, onNavigate]);
 
   /* --------------------------------------------------------------- render */
 
@@ -761,6 +813,12 @@ export function ReaderView({
           ref={scroller}
           chapter={open}
           fit={prefs.fit}
+          width={prefs.stripWidth}
+          onWidth={setStripWidth}
+          nextLabel={
+            open.next ? t("readerView.chapterLabel", { number: targetNumber(open.next) }) : null
+          }
+          onNext={goNext}
           onVisiblePage={setPage}
           onToggleChrome={() => setShowChrome((v) => !v)}
         />
@@ -946,7 +1004,7 @@ export function ReaderView({
           instead of leaving the reader to find it. Turning on from here goes
           there too, so the card is a signpost, not a gate. Kept up with the
           chrome hidden — that is exactly when the reader would miss it. */}
-      {atEnd && open.next && !showSettings && (
+      {atEnd && open.next && !showSettings && prefs.mode !== "webtoon" && (
         <div className="absolute inset-x-3 bottom-[4.25rem] z-20 flex flex-col gap-2.5 rounded-2xl bg-raised p-4 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.4)] sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-60">
           <p className="type-overline text-text-tertiary">{t("readerView.upNext")}</p>
           <p className="type-subtitle">
@@ -1113,21 +1171,53 @@ function PageImage({
   );
 }
 
-/** The continuous strip a webtoon is drawn as. */
+/** One ctrl+wheel notch or ctrl +/- press resizes the strip by this much. */
+const STRIP_STEP = 0.1;
+
+/** The strip's width, clamped to what the window can show. */
+function clampStrip(width: number, room: number): number {
+  return Math.round(Math.min(Math.max(width, STRIP_MIN), Math.max(STRIP_MIN, room)));
+}
+
+/**
+ * The continuous strip a webtoon is drawn as.
+ *
+ * Zooming here resizes the whole strip, not one image: ctrl+wheel and
+ * ctrl +/- narrow it as well as widen it, so a reader can pick the size a
+ * panel is comfortable at and keep it. Per-image zoom only ever went up —
+ * its floor is the fitted size — which left no way to make a tall strip on
+ * a wide window smaller. Pinch on a phone still zooms the image under it.
+ *
+ * After the last page, a panel says what comes next and offers it. It does
+ * not go there on its own: a strip read to its end is often scrolled back up
+ * to look again, and being thrown into the next chapter for overshooting
+ * the bottom is worse than one tap.
+ */
 function WebtoonPages({
   chapter,
   fit,
+  width,
+  onWidth,
+  nextLabel,
+  onNext,
   onVisiblePage,
   onToggleChrome,
   ref,
 }: {
   chapter: OpenChapter;
   fit: FitMode;
+  width: number | null;
+  onWidth: (width: number | null) => void;
+  /** What the next chapter is called, or `null` when this is the last. */
+  nextLabel: string | null;
+  onNext: () => void;
   onVisiblePage: (page: number) => void;
   onToggleChrome: () => void;
   ref?: React.Ref<HTMLDivElement>;
 }) {
+  const t = useT();
   const container = useRef<HTMLDivElement | null>(null);
+  const strip = width ?? STRIP_DEFAULT;
 
   // Which page is being looked at, so progress reflects scrolling rather than
   // only explicit page turns.
@@ -1152,6 +1242,41 @@ function WebtoonPages({
     return () => observer.disconnect();
   }, [chapter, onVisiblePage]);
 
+  // ctrl/cmd+wheel resizes the strip. Captured on the way down so the image
+  // under the pointer never sees it and starts a zoom of its own.
+  const widthRef = useRef(strip);
+  widthRef.current = strip;
+  useEffect(() => {
+    const node = container.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const notch = Math.max(-1, Math.min(1, event.deltaY / 100));
+      onWidth(clampStrip(widthRef.current * (1 - notch * STRIP_STEP), node.clientWidth));
+    };
+    node.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => node.removeEventListener("wheel", onWheel, { capture: true });
+  }, [onWidth]);
+
+  // A strip's height follows its width, so resizing it would throw the reader
+  // pages away from where they were. The point in the middle of the screen
+  // is kept where it was, as a share of the whole strip.
+  const anchor = useRef<number | null>(null);
+  const lastWidth = useRef(strip);
+  if (lastWidth.current !== strip && container.current && anchor.current === null) {
+    const node = container.current;
+    anchor.current = (node.scrollTop + node.clientHeight / 2) / Math.max(1, node.scrollHeight);
+  }
+  useLayoutEffect(() => {
+    lastWidth.current = strip;
+    const node = container.current;
+    if (!node || anchor.current === null) return;
+    node.scrollTop = anchor.current * node.scrollHeight - node.clientHeight / 2;
+    anchor.current = null;
+  }, [strip]);
+
   return (
     <div
       ref={(node) => {
@@ -1163,10 +1288,37 @@ function WebtoonPages({
       className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center overflow-x-hidden overflow-y-auto touch-pan-y"
     >
       {chapter.pages.map((source, index) => (
-        <div key={source} data-page={index} className="w-full max-w-4xl">
+        <div key={source} data-page={index} className="w-full" style={{ maxWidth: strip }}>
           <LazyStripPage source={source} online={chapter.online} fit={fit} />
         </div>
       ))}
+
+      <div
+        className="flex min-h-[45vh] w-full shrink-0 items-center justify-center px-6 py-10"
+        style={{ maxWidth: strip }}
+      >
+        <div className="flex flex-col items-center gap-1.5 rounded-2xl bg-ink-raised px-8 py-6 text-center text-on-ink">
+        {nextLabel ? (
+          <>
+            <p className="type-overline text-on-ink-muted">{t("readerView.upNext")}</p>
+            <p className="type-subtitle">{nextLabel}</p>
+            <Button
+              variant="secondary"
+              className="mt-2"
+              onClick={(event) => {
+                event.stopPropagation();
+                onNext();
+              }}
+            >
+              <ChevronDown />
+              {t("readerView.continue")}
+            </Button>
+          </>
+        ) : (
+          <p className="text-sm text-on-ink-muted">{t("readerView.lastChapter")}</p>
+        )}
+        </div>
+      </div>
     </div>
   );
 }
