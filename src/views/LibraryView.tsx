@@ -222,7 +222,7 @@ export function LibraryView({
             </h1>
             {series !== null && (
               <p className="mt-1 text-sm text-text-secondary">
-                {t("libraryView.subtitle", {
+                {t(shelved.length === 1 ? "libraryView.subtitleOne" : "libraryView.subtitle", {
                   series: shelved.length,
                   have: haveTotal.toLocaleString(),
                   known: knownTotal.toLocaleString(),
@@ -269,7 +269,7 @@ export function LibraryView({
                 {t("libraryView.seeHistory")}
               </Button>
             </div>
-            <div className="scrollbar-none -mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
+            <div className="scrollbar-none -mx-5 flex snap-x scroll-px-5 gap-3 overflow-x-auto px-5 pb-1 sm:mx-0 sm:scroll-px-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
               {continuing.slice(0, CONTINUE_COUNT).map((entry) => (
                 <ContinueCard
                   key={entry.series_id}
@@ -284,11 +284,11 @@ export function LibraryView({
         <section className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <h2 className="type-subtitle flex-1">{t("libraryView.series")}</h2>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
               <div
                 role="radiogroup"
                 aria-label={t("libraryView.series")}
-                className="scrollbar-none flex gap-1.5 overflow-x-auto max-sm:-mx-5 max-sm:w-screen max-sm:px-5"
+                className="scrollbar-none flex gap-1.5 overflow-x-auto max-sm:-mx-5 max-sm:w-[calc(100%+2.5rem)] max-sm:px-5"
               >
                 {slices.map((s) => (
                   <Chip
