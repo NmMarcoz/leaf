@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetBody, SheetFooter, SheetHeader, SheetStat } from "@/components/ui/sheet";
 import { ratingLabel } from "@/components/LibraryFilters";
 import { Hint } from "@/components/ui/tooltip";
+import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
+import { inOrder, useChapterOrder } from "@/lib/chapterOrder";
 import { useT } from "@/lib/i18n";
 import {
   mangaDetailsSource,
@@ -59,6 +61,7 @@ export function SourceSeriesModal({
   const t = useT();
   const [details, setDetails] = useState<SourceMangaDetails | null>(null);
   const [layout, setLayout] = useState<VolumeChapters[] | null>(null);
+  const [order, toggleOrder] = useChapterOrder();
   const [adding, setAdding] = useState(false);
   const [fetching, setFetching] = useState<string | null>(null);
 
@@ -217,7 +220,10 @@ export function SourceSeriesModal({
         )}
 
         <section className="flex flex-col gap-2">
-          <h3 className="type-overline">{t("sourceSeriesModal.chapters")}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="type-overline flex-1">{t("sourceSeriesModal.chapters")}</h3>
+            <ChapterOrderToggle order={order} onToggle={toggleOrder} />
+          </div>
           {layout === null ? (
             <p className="flex items-center gap-2 py-2 text-xs text-text-secondary">
               <Loader2 className="size-3.5 animate-spin" /> {t("sourceSeriesModal.loadingChapters")}
@@ -226,7 +232,7 @@ export function SourceSeriesModal({
             <p className="py-2 text-xs text-text-secondary">{t("sourceSeriesModal.noChapters")}</p>
           ) : (
             <div className="max-h-80 overflow-y-auto rounded-xl border border-line">
-              {layout.map((volume) => (
+              {inOrder(layout, order).map((volume) => (
                 <div key={volume.volume}>
                   <p className="sticky top-0 z-10 bg-sunken px-3.5 py-1.5 text-[11px] font-medium text-text-secondary">
                     {t("sourceSeriesModal.volumeHeading", {
@@ -234,7 +240,7 @@ export function SourceSeriesModal({
                       count: volume.chapters.length,
                     })}
                   </p>
-                  {volume.chapters.map((chapter) => (
+                  {inOrder(volume.chapters, order).map((chapter) => (
                     <ChapterRow
                       key={`${volume.volume}-${chapter.number}`}
                       chapter={chapter}

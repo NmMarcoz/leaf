@@ -22,6 +22,12 @@ const dict: PartialDictionary = {
     "readerView.previousPage": "Previous page",
     "readerView.nextPage": "Next page",
     "readerView.pageSlider": "Page",
+    "readerView.chapters": "Chapters",
+    "readerView.previousChapter": "Previous chapter",
+    "readerView.nextChapter": "Next chapter",
+    "readerView.closeChapters": "Close list",
+    "readerView.pickerHint": "Scroll, then click to open",
+    "readerView.pickerHintTouch": "Swipe, then tap to open",
   },
   "pt-BR": {
     "readerView.openingChapter": "Abrindo capítulo",
@@ -44,6 +50,12 @@ const dict: PartialDictionary = {
     "readerView.previousPage": "Página anterior",
     "readerView.nextPage": "Próxima página",
     "readerView.pageSlider": "Página",
+    "readerView.chapters": "Capítulos",
+    "readerView.previousChapter": "Capítulo anterior",
+    "readerView.nextChapter": "Próximo capítulo",
+    "readerView.closeChapters": "Fechar lista",
+    "readerView.pickerHint": "Role e clique para abrir",
+    "readerView.pickerHintTouch": "Deslize e toque para abrir",
   },
 };
 
