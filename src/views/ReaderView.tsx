@@ -11,6 +11,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { ReaderChapterDock, type DockChapter } from "@/components/ReaderChapterDock";
 import { ReaderSettings } from "@/components/ReaderSettings";
 import { Button } from "@/components/ui/button";
 import { useImageZoom } from "@/hooks/useImageZoom";
@@ -86,6 +87,14 @@ interface OpenChapter {
   startPage: number;
   previous: ReaderTarget | null;
   next: ReaderTarget | null;
+  /**
+   * Every chapter the dock's picker can jump to, one entry per number.
+   *
+   * The same set the arrows step through — downloaded chapters for a library
+   * read, the source's list when streaming — so the picker never offers a
+   * chapter that "next" would skip.
+   */
+  chapterList: DockChapter[];
   /** Where to record progress. Absent for a series not in the library. */
   progress: { seriesId: number; chapter: string } | null;
   /**
@@ -133,6 +142,15 @@ export function ReaderView({
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs);
   const [showChrome, setShowChrome] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  /** The chapter picker above the dock. */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /**
+   * Whether the pointer is near the bottom of the page, which is what raises
+   * the chapter dock on a desktop. Leaving drops it after a beat, so a
+   * pointer crossing the edge of the zone does not make it flicker.
+   */
+  const [near, setNear] = useState(false);
+  const nearTimer = useRef<number | null>(null);
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const saveTimer = useRef<number | null>(null);
@@ -168,6 +186,10 @@ export function ReaderView({
           next: found.next
             ? { kind: "library", seriesId: target.seriesId, chapter: found.next }
             : null,
+          chapterList: found.chapters.map((number) => ({
+            number,
+            target: { kind: "library", seriesId: target.seriesId, chapter: number },
+          })),
           progress: { seriesId: target.seriesId, chapter: found.number },
           online_source:
             found.source && found.series_source_id
@@ -222,6 +244,34 @@ export function ReaderView({
         const rank = ordered.filter((c) => c.number === here).findIndex((c) => c.id === target.chapterId);
         return sibling(ordered.indexOf(uploads[rank] ?? uploads[0]));
       };
+      // One picker entry per chapter number, choosing among a number's
+      // uploads the way `neighbour` does: the one in the same slot as the
+      // upload being read, so a jump stays with the same group.
+      const rank = Math.max(
+        0,
+        ordered
+          .filter((c) => c.number === target.chapterNumber)
+          .findIndex((c) => c.id === target.chapterId),
+      );
+      const chapterList: DockChapter[] = [];
+      for (const entry of ordered) {
+        if (chapterList.some((c) => c.number === entry.number)) continue;
+        const uploads = ordered.filter((c) => c.number === entry.number);
+        const chosen =
+          entry.number === target.chapterNumber
+            ? (uploads.find((c) => c.id === target.chapterId) ?? uploads[0])
+            : (uploads[rank] ?? uploads[0]);
+        chapterList.push({
+          number: entry.number,
+          target: {
+            ...target,
+            chapters: ordered,
+            chapterId: chosen.id,
+            chapterNumber: chosen.number,
+            kind: "online",
+          },
+        });
+      }
       const sibling = (index: number): ReaderTarget | null => {
         const found = at < 0 ? undefined : ordered[index];
         return found
@@ -265,6 +315,7 @@ export function ReaderView({
         startPage: Math.min(keepPage.current ?? 0, found.pages.length - 1),
         previous: neighbour(-1),
         next: neighbour(1),
+        chapterList,
         progress: seriesId ? { seriesId, chapter: target.chapterNumber } : null,
         online_source: target.seriesSourceId
           ? {
@@ -294,6 +345,41 @@ export function ReaderView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
+
+  // A new chapter starts with the picker shut: it was used to get here.
+  useEffect(() => setPickerOpen(false), [target]);
+
+  useEffect(
+    () => () => {
+      if (nearTimer.current) window.clearTimeout(nearTimer.current);
+    },
+    [],
+  );
+
+  /**
+   * Figma "Reader proximity zone": a band above the scrubber, 400px wide,
+   * plus the scrubber itself so moving down onto it keeps the dock up.
+   * Measured from mouse moves rather than an invisible element over the
+   * page, which would swallow the taps the middle of the page answers to.
+   */
+  const trackProximity = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    const { left, top, width, height } = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - left - width / 2;
+    const fromBottom = top + height - event.clientY;
+    const inside =
+      fromBottom <= DOCK_ZONE_HEIGHT && Math.abs(x) <= (fromBottom <= 64 ? 300 : 200);
+    if (inside) {
+      if (nearTimer.current) window.clearTimeout(nearTimer.current);
+      nearTimer.current = null;
+      setNear(true);
+    } else if (!nearTimer.current) {
+      nearTimer.current = window.setTimeout(() => {
+        nearTimer.current = null;
+        setNear(false);
+      }, 350);
+    }
+  }, []);
 
   // Decoded pages are large; holding a whole series' worth would be a leak.
   useEffect(() => clearPages, []);
@@ -461,6 +547,16 @@ export function ReaderView({
       const node = event.target as HTMLElement | null;
       if (node && (node.tagName === "INPUT" || node.isContentEditable)) return;
 
+      // With the picker up, Escape closes it — not the reader behind it — and
+      // nothing else turns a page the reader is not looking at.
+      if (pickerOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setPickerOpen(false);
+        }
+        return;
+      }
+
       // ctrl/cmd with + - 0 sizes the webtoon strip, as the wheel does.
       if (prefs.mode === "webtoon" && (event.ctrlKey || event.metaKey)) {
         const delta = event.key === "+" || event.key === "=" ? 1 : event.key === "-" ? -1 : 0;
@@ -538,7 +634,7 @@ export function ReaderView({
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [advance, onExit, rtl, prefs.mode, total]);
+  }, [advance, onExit, rtl, prefs.mode, total, pickerOpen]);
 
   // Where a touch started, and whether the gesture that just ended was a swipe
   // rather than a tap. Refs because neither ever needs to paint anything.
@@ -740,8 +836,20 @@ export function ReaderView({
     );
   }
 
+  // A phone has no pointer to come near with; the dock comes with the chrome
+  // a tap in the middle of the page shows.
+  const dockVisible = (isMobile ? showChrome : near) && open.chapterList.length > 0;
+
   return (
-    <div className={cn("relative flex h-full flex-col", surface)}>
+    <div
+      className={cn("relative flex h-full flex-col", surface)}
+      onMouseMove={trackProximity}
+      onMouseLeave={() => {
+        if (nearTimer.current) window.clearTimeout(nearTimer.current);
+        nearTimer.current = null;
+        setNear(false);
+      }}
+    >
       {showChrome && (
         <>
           {/* Floating ink pills rather than full-width bars (Figma "13 ·
@@ -1004,8 +1112,29 @@ export function ReaderView({
           instead of leaving the reader to find it. Turning on from here goes
           there too, so the card is a signpost, not a gate. Kept up with the
           chrome hidden — that is exactly when the reader would miss it. */}
+      <ReaderChapterDock
+        visible={dockVisible}
+        chapters={open.chapterList}
+        current={open.number}
+        previous={open.previous}
+        next={open.next}
+        rtl={rtl}
+        pickerOpen={pickerOpen}
+        onPickerOpenChange={setPickerOpen}
+        onNavigate={onNavigate}
+        // 16px above the scrubber pill, which is 44px tall.
+        className="bottom-[4.25rem] sm:bottom-20"
+      />
+
       {atEnd && open.next && !showSettings && prefs.mode !== "webtoon" && (
-        <div className="absolute inset-x-3 bottom-[4.25rem] z-20 flex flex-col gap-2.5 rounded-2xl bg-raised p-4 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.4)] sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-60">
+        <div
+          className={cn(
+            "absolute inset-x-3 z-20 flex flex-col gap-2.5 rounded-2xl bg-raised p-4 text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.4)] sm:inset-x-auto sm:bottom-24 sm:right-6 sm:w-60",
+            // On a phone the dock rises into the card's place, so the card
+            // steps up over it rather than hiding under it.
+            dockVisible ? "bottom-[calc(4.25rem+68px)]" : "bottom-[4.25rem]",
+          )}
+        >
           <p className="type-overline text-text-tertiary">{t("readerView.upNext")}</p>
           <p className="type-subtitle">
             {t("readerView.chapterLabel", { number: targetNumber(open.next) })}
@@ -1038,6 +1167,10 @@ export function ReaderView({
     </div>
   );
 }
+
+/** How far up from the bottom of the reader the pointer raises the chapter
+ * dock: the scrubber's 64px plus the design's 128px proximity zone. */
+const DOCK_ZONE_HEIGHT = 192;
 
 /** The floating ink pill every piece of reader chrome sits in (Figma "13 · Leitor"). */
 const PILL =

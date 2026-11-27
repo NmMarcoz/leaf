@@ -45,6 +45,10 @@ pub struct ReaderChapter {
     /// Adjacent chapters that are downloaded, for moving between them.
     pub previous: Option<String>,
     pub next: Option<String>,
+    /// Every downloaded chapter, in reading order — what the reader's chapter
+    /// picker scrolls through. The same list `previous`/`next` step along, so
+    /// the picker can never offer a chapter the arrows would skip.
+    pub chapters: Vec<String>,
     /// Where this series came from, when it came from anywhere. Enough to read
     /// the same chapter in another translation, which means streaming it — the
     /// pages on disk are in one language and cannot be swapped.
@@ -94,6 +98,7 @@ pub async fn reader_chapter(
             title: stored.title,
             previous: at.and_then(|i| i.checked_sub(1)).and_then(|i| order.get(i).cloned()),
             next: at.and_then(|i| order.get(i + 1).cloned()),
+            chapters: order,
             source: series.source,
             series_source_id: series.source_id,
             language: series.language,

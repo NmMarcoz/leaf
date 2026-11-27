@@ -18,6 +18,8 @@ export interface ReaderChapter {
   last_page: number;
   previous: string | null;
   next: string | null;
+  /** Every downloaded chapter, in reading order: what the chapter picker lists. */
+  chapters: string[];
   /** Enough to read the same chapter in another translation, by streaming it. */
   source: string | null;
   series_source_id: string | null;
