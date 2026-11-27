@@ -2298,7 +2298,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-app"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2323,7 +2323,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-cli"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-core"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2352,7 +2352,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-extensions"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "leaf-core",
@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-fetch"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-library"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2394,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-meta"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -2404,7 +2404,7 @@ dependencies = [
 
 [[package]]
 name = "leaf-send"
-version = "1.3.0"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
