@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeft,
@@ -31,6 +31,11 @@ import {
 } from "@/components/ContextMenu";
 import { ChapterFetchDialog } from "@/components/ChapterFetchDialog";
 import { OrganizeChaptersPanel } from "@/components/OrganizeChaptersPanel";
+import {
+  isReadable,
+  ReadingModeChapters,
+  sourceOrder,
+} from "@/components/ReadingModeChapters";
 import { RemoteImage } from "@/components/RemoteImage";
 import { RemoveSeriesDialog } from "@/components/RemoveSeriesDialog";
 import { SourceDownloadDialog } from "@/components/SourceDownloadDialog";
@@ -51,6 +56,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
+import { inOrder, useChapterOrder } from "@/lib/chapterOrder";
 import { Hint } from "@/components/ui/tooltip";
 import { useThumbnail } from "@/hooks/useThumbnail";
 import { useT } from "@/lib/i18n";
@@ -126,6 +135,42 @@ interface SeriesViewProps {
   onTasksChanged: () => void;
 }
 
+const READING_MODE_KEY = "leaf:series-reading-mode";
+
+/**
+ * Whether series pages open in reading mode.
+ *
+ * One switch for every series rather than one each: it is a way of using the
+ * app — reading through, not assembling volumes — and someone in that mode
+ * does not want to turn it on again for every title they open.
+ */
+function loadReadingMode(): boolean {
+  try {
+    return localStorage.getItem(READING_MODE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveReadingMode(on: boolean) {
+  try {
+    localStorage.setItem(READING_MODE_KEY, on ? "1" : "0");
+  } catch {
+    // Private storage off: the mode just will not outlive this page.
+  }
+}
+
+/**
+ * Where the page is in the reading-mode film (Figma "v2 · Modo de leitura ·
+ * transições em etapas"). The `to-` stages are the outgoing half: both
+ * layouts are briefly on screen, one leaving.
+ */
+type Stage = "volumes" | "to-chapters" | "chapters" | "to-volumes";
+
+/** The panel's slide (420ms) and the content's collapse (220ms) in ms. */
+const PANEL_MS = 420;
+const COLLAPSE_MS = 220;
+
 /**
  * One series as a shelf of volumes, with the gaps visible at a glance.
  *
@@ -175,6 +220,18 @@ export function SeriesView({
   // network call for something most visits never look at.
   const [languages, setLanguages] = useState<string[] | null>(null);
   const [switching, setSwitching] = useState(false);
+
+  const [readingMode, setReadingMode] = useState(loadReadingMode);
+  const [stage, setStage] = useState<Stage>(() => (loadReadingMode() ? "chapters" : "volumes"));
+  /** Whether a toggle has happened: what arrives on first load just appears. */
+  const [animated, setAnimated] = useState(false);
+  const [panelMotion, setPanelMotion] = useState<"in" | "out" | null>(null);
+  /** The volume whose panel reading mode closed, to bring back on leaving it. */
+  const restoreVolume = useRef<string | null>(null);
+  const stageTimers = useRef<number[]>([]);
+  /** The page's scroller: reading mode's chapter list scrolls with it. */
+  const page = useRef<HTMLElement | null>(null);
+  useEffect(() => () => stageTimers.current.forEach((id) => window.clearTimeout(id)), []);
 
   // Volume numbers picked for a batch build, plus the anchor shift-click extends
   // from. Mirrors how the page grid in the editor already behaves.
@@ -565,9 +622,11 @@ export function SeriesView({
         direction: series.direction === "left-to-right" ? "left-to-right" : "right-to-left",
         language: series.language,
         // The whole series in reading order, so finishing one chapter moves to
-        // the next rather than stopping at whatever was opened.
-        chapters: (volumes ?? [])
-          .flatMap((v) => v.chapters)
+        // the next rather than stopping at whatever was opened. By chapter
+        // number, not shelf order: a volume layout can file a late chapter
+        // ahead of earlier unsorted ones, and "next" after chapter 4 was
+        // chapter 24 that way.
+        chapters: sourceOrder((volumes ?? []).flatMap((v) => v.chapters))
           .filter((c) => c.source_id && !c.unavailable)
           .map((c) => ({ id: c.source_id as string, number: c.number })),
         seriesSourceId: series.source_id,
@@ -577,6 +636,69 @@ export function SeriesView({
     },
     [series, seriesId, volumes, onRead],
   );
+
+  /**
+   * Turn reading mode on or off, in the design's stages.
+   *
+   * On: the volume panel slides away and gives its width back, the shelf
+   * folds up, and only then does the chapter list come in. Off runs it
+   * backwards — list folds, shelf returns, and the panel that was open slides
+   * back last. Each step waits for the one before so nothing moves under
+   * something else that is moving.
+   */
+  const toggleReadingMode = useCallback(
+    (on: boolean) => {
+      stageTimers.current.forEach((id) => window.clearTimeout(id));
+      stageTimers.current = [];
+      const quick = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const later = (ms: number, run: () => void) => {
+        stageTimers.current.push(window.setTimeout(run, quick ? 0 : ms));
+      };
+
+      setReadingMode(on);
+      saveReadingMode(on);
+      setAnimated(true);
+
+      if (on) {
+        // On a phone the panel covers the page, switch included, so it can
+        // only be closed already; nothing to slide or bring back.
+        const panelOpen = !isMobile && selectedVolume !== null;
+        restoreVolume.current = panelOpen ? selectedVolume : null;
+        setPanelMotion(panelOpen ? "out" : null);
+        setStage("to-chapters");
+        later(panelOpen ? PANEL_MS + 20 : COLLAPSE_MS + 20, () => {
+          setStage("chapters");
+          setPanelMotion(null);
+          if (selectedVolume !== null) onSelectedVolumeChange(null);
+        });
+      } else {
+        setStage("to-volumes");
+        later(COLLAPSE_MS + 20, () => {
+          setStage("volumes");
+          const back = restoreVolume.current;
+          restoreVolume.current = null;
+          if (!back) return;
+          later(200, () => {
+            setPanelMotion("in");
+            onSelectedVolumeChange(back);
+            later(PANEL_MS + 20, () => setPanelMotion(null));
+          });
+        });
+      }
+    },
+    [selectedVolume, onSelectedVolumeChange],
+  );
+
+  const showVolumes = stage === "volumes" || stage === "to-chapters";
+  const showChapters = stage === "chapters" || stage === "to-volumes";
+
+  /** The whole series in the order the source lists it, for reading mode. */
+  const listed = useMemo(
+    () => sourceOrder((volumes ?? []).flatMap((v) => v.chapters)),
+    [volumes],
+  );
+  /** Where "straight to a chapter" goes: where reading left off, or the start. */
+  const quickRead = resume ?? listed.find(isReadable) ?? null;
 
   const pickedBuildable = order.filter((n) => picked.has(n) && buildable.has(n));
 
@@ -588,14 +710,23 @@ export function SeriesView({
   const publishedCount = (volumes ?? []).filter((v) => v.number !== UNSORTED).length;
 
   return (
-    <div className="relative flex h-full min-h-0">
+    // overflow-hidden: the volume panel slides out past the right edge.
+    <div className="relative flex h-full min-h-0 overflow-hidden">
       <main
+        ref={page}
         className="scrollbar-thin min-w-0 flex-1 overflow-y-auto"
         onClick={(e) => {
           if (e.target === e.currentTarget) setPicked(new Set());
         }}
       >
-        <div className="mx-auto flex max-w-[880px] flex-col gap-7 px-5 pb-10 pt-5 sm:px-8 sm:pt-8">
+        <div
+          className={cn(
+            "mx-auto flex flex-col gap-7 px-5 pb-10 pt-5 transition-[max-width] duration-300 sm:px-8 sm:pt-8",
+            // The list has more to say per row than a volume card, and reading
+            // mode has the panel's width to spend on it.
+            showChapters ? "max-w-[1048px]" : "max-w-[880px]",
+          )}
+        >
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
@@ -610,17 +741,39 @@ export function SeriesView({
               {t("seriesView.backToShelf")}
             </Button>
             <div className="flex-1" />
-            {missing.length > 0 && (
+            {/* Figma 07c: the switch sits in the top bar in both modes, so
+                the way back out is where the way in was. */}
+            <div className="flex items-center gap-3 pr-1">
+              <Label
+                htmlFor="reading-mode"
+                className="cursor-pointer whitespace-nowrap text-sm font-medium normal-case tracking-normal text-foreground"
+              >
+                {t("seriesView.readingMode")}
+              </Label>
+              <Switch
+                id="reading-mode"
+                checked={readingMode}
+                onCheckedChange={toggleReadingMode}
+                title={t("seriesView.readingModeHint")}
+              />
+            </div>
+            {/* In reading mode this moves down beside the chapter filters. */}
+            {missing.length > 0 && showVolumes && (
               <Button
                 variant="outline"
+                className={cn(stage === "to-chapters" && "collapse-out")}
                 onClick={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
                   setRouting({ at: { x: r.left, y: r.bottom + 4 }, wanted: missing });
                 }}
                 title={t("seriesView.findMissingHint", { count: missing.length })}
+                aria-label={t("seriesView.getMissing", { count: missing.length })}
               >
                 <Download />
-                {t("seriesView.getMissing", { count: missing.length })}
+                {/* A phone's top bar has the switch to fit as well. */}
+                <span className="max-sm:hidden">
+                  {t("seriesView.getMissing", { count: missing.length })}
+                </span>
               </Button>
             )}
             <Button
@@ -658,22 +811,92 @@ export function SeriesView({
                   .catch((e) => onError(String(e)))
                   .finally(() => setSwitching(false));
               }}
-              resume={resume}
+              resume={showChapters ? null : resume}
               readCount={read.length}
               onResume={() => resume && openChapter(resume)}
               onForget={() => setForgetting(true)}
+              aside={
+                showChapters && quickRead ? (
+                  <QuickRead
+                    chapter={quickRead}
+                    onRead={() => openChapter(quickRead)}
+                    className={cn(
+                      stage === "to-volumes" ? "collapse-out" : animated ? "rise-in" : undefined,
+                    )}
+                  />
+                ) : null
+              }
             />
           )}
 
-          {volumes !== null && volumes.length > 0 && (
-            <div className="grid grid-cols-3 gap-3 max-sm:gap-2">
+          {showChapters && volumes !== null && (
+            <section
+              className={cn(
+                "flex flex-col gap-4",
+                stage === "to-volumes" && "collapse-out",
+              )}
+            >
+              <ReadingModeChapters
+                chapters={listed}
+                scroller={page}
+                summary={t("seriesView.publishedSummary", {
+                  volumes: publishedCount,
+                  chapters: chapterTotal,
+                })}
+                resume={resume?.number ?? null}
+                missingCount={missing.length}
+                sourceName={
+                  series?.source === "mangadex" || series?.source === "kitsu"
+                    ? sourceLabel(series.source, t)
+                    : null
+                }
+                // Only a chapter's own URL names where it came from: the id
+                // fallback in `chapterSource` assumes MangaDex, which is wrong
+                // for a series read through an extension.
+                sourceOf={(chapter) => (chapter.source_url ? chapterSource(chapter) : null)}
+                fetchingDirect={fetchingDirect}
+                onRead={openChapter}
+                onFetchDirect={(chapter) => void fetchDirect(chapter)}
+                onGet={setFetching}
+                onGetMissing={(at) => setRouting({ at, wanted: missing })}
+                animate={animated && stage === "chapters"}
+              />
+            </section>
+          )}
+
+          {showVolumes && volumes !== null && volumes.length > 0 && (
+            <div
+              className={cn(
+                "grid grid-cols-3 gap-3 max-sm:gap-2",
+                stage === "to-chapters"
+                  ? "collapse-out"
+                  : animated
+                    ? "rise-in"
+                    : undefined,
+              )}
+              // The shelf folds while the panel is still leaving, not before.
+              style={stage === "to-chapters" && panelMotion === "out" ? { animationDelay: "200ms" } : undefined}
+            >
               <StatCard tone="info" label={t("seriesView.statBuilt")} value={builtCount} />
               <StatCard tone="ink" label={t("seriesView.statReady")} value={readyCount} />
               <StatCard tone="warning" label={t("seriesView.statMissing")} value={missing.length} />
             </div>
           )}
 
-          <section className="flex flex-col gap-4">
+          {showVolumes && (
+          <section
+            className={cn(
+              "flex flex-col gap-4",
+              stage === "to-chapters" ? "collapse-out" : animated ? "rise-in" : undefined,
+            )}
+            style={
+              stage === "to-chapters" && panelMotion === "out"
+                ? { animationDelay: "200ms" }
+                : stage === "volumes" && animated
+                  ? { animationDelay: "60ms" }
+                  : undefined
+            }
+          >
             <div className="flex items-baseline gap-4">
               <h2 className="type-subtitle flex-1">{t("seriesView.volumes")}</h2>
               {volumes !== null && volumes.length > 0 && (
@@ -715,11 +938,15 @@ export function SeriesView({
             </div>
           )}
           </section>
+          )}
         </div>
       </main>
 
-        {detail && (
+        {detail && showVolumes && (
           <VolumePanel
+            className={
+              panelMotion === "out" ? "panel-out" : panelMotion === "in" ? "panel-in" : undefined
+            }
             volume={detail}
             pageCount={detail.chapters.reduce((n, c) => n + (c.folder ? c.page_count : 0), 0)}
             building={building === detail.number}
@@ -1186,6 +1413,7 @@ function VolumeArt({ volume, dimmed }: { volume: VolumeStatus; dimmed: boolean }
  * delivery colour; building and saving elsewhere sit behind the chevron.
  */
 function VolumePanel({
+  className,
   volume,
   pageCount,
   building,
@@ -1208,6 +1436,8 @@ function VolumePanel({
   onAssignToVolume,
   onResetToSource,
 }: {
+  /** The reading-mode slide, when one is running. */
+  className?: string;
   volume: VolumeStatus;
   /** Pages on disk across the volume's chapters. */
   pageCount: number;
@@ -1246,6 +1476,7 @@ function VolumePanel({
   const complete = isComplete(volume);
   const isUnsorted = volume.number === UNSORTED;
   const [options, setOptions] = useState<ContextMenuPosition | null>(null);
+  const [order, toggleOrder] = useChapterOrder();
   const { ref, url } = useThumbnail(volume.cover_path ?? "", 160);
   const numbers = volume.chapters.map((c) => c.number);
   const range =
@@ -1258,6 +1489,7 @@ function VolumePanel({
         // A 380px panel beside a grid leaves a phone's grid nothing, so there
         // it covers the grid instead of sitting next to it.
         isMobile ? "absolute inset-0 z-30" : "w-[380px] shrink-0 border-l border-line",
+        className,
       )}
     >
       <div className="flex flex-col gap-4 border-b border-line p-5">
@@ -1352,13 +1584,18 @@ function VolumePanel({
       ) : (
         <>
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-            <p className="type-overline px-5 pb-1 pt-4">{t("seriesView.chaptersOverline")}</p>
+            <div className="flex items-center gap-2 pb-1 pl-5 pr-3 pt-3">
+              <p className="type-overline flex-1">{t("seriesView.chaptersOverline")}</p>
+              {volume.chapters.length > 1 && (
+                <ChapterOrderToggle order={order} onToggle={toggleOrder} />
+              )}
+            </div>
             {volume.chapters.length === 0 ? (
               <p className="px-5 py-4 text-xs text-text-secondary">
                 {t("seriesView.noChaptersListed")}
               </p>
             ) : (
-              volume.chapters.map((chapter) => (
+              inOrder(volume.chapters, order).map((chapter) => (
                 <ChapterRow
                   key={chapter.number}
                   chapter={chapter}
@@ -1750,7 +1987,10 @@ function SeriesDetails({
   readCount,
   onResume,
   onForget,
+  aside,
 }: {
+  /** A column beside the details: reading mode's way straight into a chapter. */
+  aside?: React.ReactNode;
   series: Series;
   /** Translations the source has, once asked for. `null` means not yet. */
   languages: string[] | null;
@@ -1896,6 +2136,49 @@ function SeriesDetails({
           </div>
         )}
       </div>
+
+      {aside}
+    </div>
+  );
+}
+
+/**
+ * Figma 07c "Leitura rápida": the one chapter to open, beside the series.
+ *
+ * Where reading left off when it did, the first chapter that can be opened
+ * otherwise — the shelf's resume button, promoted, because in reading mode
+ * opening a chapter is what the page is for.
+ */
+function QuickRead({
+  chapter,
+  onRead,
+  className,
+}: {
+  chapter: ChapterStatus;
+  onRead: () => void;
+  className?: string;
+}) {
+  const t = useT();
+  const resuming = chapter.opened_at !== null && chapter.last_page > 0 && !chapter.read_at;
+  return (
+    <div
+      className={cn(
+        "flex w-[200px] shrink-0 flex-col justify-center gap-3 max-sm:w-full",
+        className,
+      )}
+    >
+      <p className="type-overline">{t("seriesView.straightToChapter")}</p>
+      <Button className="h-10 w-full justify-start" onClick={onRead}>
+        <BookOpen />
+        <span className="truncate">
+          {resuming
+            ? t("seriesView.continueChapterShort", { number: chapter.number })
+            : t("seriesView.readChapterNumber", { number: chapter.number })}
+        </span>
+      </Button>
+      <p className="text-xs text-text-tertiary">
+        {chapter.folder ? t("seriesView.readHereCaption") : t("seriesView.readOnlineCaption")}
+      </p>
     </div>
   );
 }

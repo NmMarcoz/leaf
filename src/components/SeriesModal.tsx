@@ -42,6 +42,8 @@ import {
   libraryAddSeries,
   type Series,
 } from "@/lib/library";
+import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
+import { inOrder, useChapterOrder } from "@/lib/chapterOrder";
 import { useT } from "@/lib/i18n";
 import type { ReaderTarget } from "@/lib/reader";
 import { cn } from "@/lib/utils";
@@ -79,6 +81,7 @@ export function SeriesModal({
   const [stats, setStats] = useState<Statistics | null>(null);
   const [similar, setSimilar] = useState<SeriesMatch[]>([]);
   const [layout, setLayout] = useState<VolumeChapters[] | null>(null);
+  const [order, toggleOrder] = useChapterOrder();
   const [language, setLanguage] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [fetching, setFetching] = useState<string | null>(null);
@@ -349,6 +352,7 @@ export function SeriesModal({
         <section className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <h3 className="type-overline flex-1">{t("seriesModal.translation")}</h3>
+            <ChapterOrderToggle order={order} onToggle={toggleOrder} />
             <Select
               value={language ?? ""}
               onValueChange={(v) => setLanguage(v)}
@@ -378,7 +382,7 @@ export function SeriesModal({
             </p>
           ) : (
             <div className="max-h-72 overflow-y-auto rounded-xl border border-line">
-              {layout.map((volume) => (
+              {inOrder(layout, order).map((volume) => (
                 <div key={volume.volume}>
                   <p className="sticky top-0 z-10 bg-sunken px-3.5 py-1.5 text-[11px] font-medium text-text-secondary">
                     {t("seriesModal.volumeHeader", {
@@ -386,7 +390,7 @@ export function SeriesModal({
                       count: volume.chapters.length,
                     })}
                   </p>
-                  {volume.chapters.map((chapter) => (
+                  {inOrder(volume.chapters, order).map((chapter) => (
                     <ChapterRow
                       key={`${volume.volume}-${chapter.number}`}
                       chapter={chapter}

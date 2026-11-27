@@ -7,11 +7,15 @@ const dict: PartialDictionary = {
     "common.black": "black",
     "common.grey": "grey",
     "common.white": "white",
+    "common.showNewestFirst": "Show newest chapters first",
+    "common.showOldestFirst": "Show first chapters first",
   },
   "pt-BR": {
     "common.black": "preto",
     "common.grey": "cinza",
     "common.white": "branco",
+    "common.showNewestFirst": "Mostrar os capítulos mais novos primeiro",
+    "common.showOldestFirst": "Mostrar os primeiros capítulos primeiro",
   },
 };
 
