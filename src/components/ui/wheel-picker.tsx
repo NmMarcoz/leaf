@@ -48,6 +48,8 @@ export interface WheelPickerProps {
   labels: string[];
   /** The row that is "here" — highlighted, and the one the list opens on. */
   current: number;
+  /** Open on this row instead of `current` — the top, after a reorder. */
+  initial?: number;
   /** A row was chosen: clicked, or Enter on the keyboard's row. */
   onPick: (index: number) => void;
   /** Escape. */
@@ -80,6 +82,7 @@ export interface WheelPickerProps {
 export function WheelPicker({
   labels,
   current,
+  initial = current,
   onPick,
   onCancel,
   ariaLabel,
@@ -91,9 +94,9 @@ export function WheelPicker({
   // the bottom one. A list shorter than the viewport just sits centred.
   const lo = Math.min(HALF, last / 2);
   const hi = Math.max(last - HALF, last / 2);
-  const [offset, setOffset] = useState(() => clamp(current, lo, hi));
+  const [offset, setOffset] = useState(() => clamp(initial, lo, hi));
   /** The row the keyboard is on; starts on the current one. */
-  const [active, setActive] = useState(() => clamp(current, 0, last));
+  const [active, setActive] = useState(() => clamp(initial, 0, last));
   /** Whether the keyboard is driving, which is when the active row shows. */
   const [keyboard, setKeyboard] = useState(false);
 

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { BookOpen, ChevronsLeft, ChevronsRight, X } from "lucide-react";
 
 import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
@@ -56,6 +57,17 @@ export function ReaderChapterDock({
 }: ReaderChapterDockProps) {
   const t = useT();
   const [order, toggleOrder] = useChapterOrder();
+  /**
+   * Whether the order was flipped while the picker is open. A flip shows the
+   * list from its new top — newest first means the newest chapter in view —
+   * rather than staying on the chapter being read, which only looked like
+   * the scrolling had been turned backwards. Opening the picker again goes
+   * back to the chapter being read.
+   */
+  const [fromTop, setFromTop] = useState(false);
+  useEffect(() => {
+    if (pickerOpen) setFromTop(false);
+  }, [pickerOpen]);
   const dock = usePresence(visible || pickerOpen, 160);
   const picker = usePresence(pickerOpen, 180);
 
@@ -107,7 +119,14 @@ export function ReaderChapterDock({
                 <p className="text-sm font-medium">{t("readerView.chapters")}</p>
                 <div className="flex-1" />
                 <span className="font-mono text-xs text-on-ink-muted">{chapters.length}</span>
-                <ChapterOrderToggle tone="ink" order={order} onToggle={toggleOrder} />
+                <ChapterOrderToggle
+                  tone="ink"
+                  order={order}
+                  onToggle={() => {
+                    toggleOrder();
+                    setFromTop(true);
+                  }}
+                />
                 <button
                   type="button"
                   aria-label={t("readerView.closeChapters")}
@@ -126,6 +145,7 @@ export function ReaderChapterDock({
                 className="mx-3 mt-3"
                 labels={listed.map((c) => t("readerView.chapterLabel", { number: c.number }))}
                 current={at}
+                initial={fromTop ? 0 : at}
                 ariaLabel={t("readerView.chapters")}
                 onCancel={() => onPickerOpenChange(false)}
                 onPick={(index) => {

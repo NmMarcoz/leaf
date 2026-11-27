@@ -179,7 +179,7 @@ export function ReadingModeChapters({
 
   const resumeIndex = resume ? shown.findIndex((c) => c.number === resume) : -1;
   /** Bring a row to just under the pinned header, one row of context above. */
-  const jumpTo = (index: number) => {
+  const jumpTo = (index: number, instant = false) => {
     const page = scroller.current;
     const node = list.current;
     if (!page || !node) return;
@@ -188,7 +188,10 @@ export function ReadingModeChapters({
     const headerHeight = header.current?.offsetHeight ?? 0;
     page.scrollTo({
       top: listTop + Math.max(0, index - 1) * ROW - headerHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      behavior:
+        instant || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
     });
   };
 
@@ -218,7 +221,17 @@ export function ReadingModeChapters({
               {t("seriesView.filterDownloaded")}
             </Chip>
           </div>
-          <ChapterOrderToggle order={order} onToggle={toggleOrder} />
+          <ChapterOrderToggle
+            order={order}
+            onToggle={() => {
+              toggleOrder();
+              // Scrolled into the list, a flip starts it again from its new
+              // top — the newest chapter, for newest first. Staying at the
+              // same scroll position would show some other stretch of
+              // chapters, which reads as nothing sensible.
+              if (view.pinned) jumpTo(0, true);
+            }}
+          />
           {resumeIndex >= 0 && (
             <Button
               variant="ghost"
