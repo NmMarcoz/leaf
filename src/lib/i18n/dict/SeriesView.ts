@@ -122,8 +122,6 @@ const dict: PartialDictionary = {
     "seriesView.filterDownloaded": "Downloaded",
     "seriesView.noDownloadedChapters": "No chapters downloaded yet.",
     "seriesView.downloadOfflineHint": "Download chapters to read without a connection.",
-    "seriesView.previousChapters": "Previous chapters",
-    "seriesView.nextChapters": "Next chapters",
     "seriesView.online": "Online",
     "seriesView.downloaded": "Downloaded",
     "seriesView.downloadForOffline": "Download chapter {number} to read offline",
@@ -131,6 +129,7 @@ const dict: PartialDictionary = {
     "seriesView.continueChapterShort": "Continue chapter {number}",
     "seriesView.readHereCaption": "Read here, without building a volume.",
     "seriesView.readOnlineCaption": "Read online, without building a volume.",
+    "seriesView.goToChapter": "Go to chapter {number}",
   },
   "pt-BR": {
     "seriesView.backToShelf": "Estante",
@@ -253,8 +252,6 @@ const dict: PartialDictionary = {
     "seriesView.filterDownloaded": "Baixados",
     "seriesView.noDownloadedChapters": "Nenhum capítulo baixado ainda.",
     "seriesView.downloadOfflineHint": "Baixe capítulos para ler sem conexão.",
-    "seriesView.previousChapters": "Capítulos anteriores",
-    "seriesView.nextChapters": "Próximos capítulos",
     "seriesView.online": "Online",
     "seriesView.downloaded": "Baixado",
     "seriesView.downloadForOffline": "Baixar capítulo {number} para ler offline",
@@ -262,6 +259,7 @@ const dict: PartialDictionary = {
     "seriesView.continueChapterShort": "Continuar capítulo {number}",
     "seriesView.readHereCaption": "Leia aqui, sem gerar um volume.",
     "seriesView.readOnlineCaption": "Leia online, sem gerar um volume.",
+    "seriesView.goToChapter": "Ir para o capítulo {number}",
   },
 };
 

@@ -227,6 +227,8 @@ export function SeriesView({
   /** The volume whose panel reading mode closed, to bring back on leaving it. */
   const restoreVolume = useRef<string | null>(null);
   const stageTimers = useRef<number[]>([]);
+  /** The page's scroller: reading mode's chapter list scrolls with it. */
+  const page = useRef<HTMLElement | null>(null);
   useEffect(() => () => stageTimers.current.forEach((id) => window.clearTimeout(id)), []);
 
   // Volume numbers picked for a batch build, plus the anchor shift-click extends
@@ -707,6 +709,7 @@ export function SeriesView({
     // overflow-hidden: the volume panel slides out past the right edge.
     <div className="relative flex h-full min-h-0 overflow-hidden">
       <main
+        ref={page}
         className="scrollbar-thin min-w-0 flex-1 overflow-y-auto"
         onClick={(e) => {
           if (e.target === e.currentTarget) setPicked(new Set());
@@ -829,19 +832,13 @@ export function SeriesView({
                 stage === "to-volumes" && "collapse-out",
               )}
             >
-              <div className="flex items-baseline gap-4">
-                <h2 className="type-subtitle flex-1">{t("seriesView.chaptersOverline")}</h2>
-                {volumes.length > 0 && (
-                  <span className="text-xs text-text-secondary">
-                    {t("seriesView.publishedSummary", {
-                      volumes: publishedCount,
-                      chapters: chapterTotal,
-                    })}
-                  </span>
-                )}
-              </div>
               <ReadingModeChapters
                 chapters={listed}
+                scroller={page}
+                summary={t("seriesView.publishedSummary", {
+                  volumes: publishedCount,
+                  chapters: chapterTotal,
+                })}
                 resume={resume?.number ?? null}
                 missingCount={missing.length}
                 sourceName={
