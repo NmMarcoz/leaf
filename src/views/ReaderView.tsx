@@ -836,9 +836,13 @@ export function ReaderView({
     );
   }
 
-  // A phone has no pointer to come near with; the dock comes with the chrome
-  // a tap in the middle of the page shows.
-  const dockVisible = (isMobile ? showChrome : near) && open.chapterList.length > 0;
+  // The bottom controls — page scrubber and chapter dock — come up together,
+  // either with the chrome a tap in the middle of the page shows, or, on a
+  // desktop, when the pointer comes near the bottom. Two ways in to the same
+  // controls; showing one without the other left the page position missing
+  // from the hover and the chapter jumps missing from the tap.
+  const bottomControls = showChrome || (!isMobile && near);
+  const dockVisible = bottomControls && open.chapterList.length > 0;
 
   return (
     <div
@@ -1051,7 +1055,7 @@ export function ReaderView({
         </div>
       )}
 
-      {showChrome && (
+      {bottomControls && (
         <div
           className={cn(
             PILL,
