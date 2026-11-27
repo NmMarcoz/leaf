@@ -2,9 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { BookOpen, CircleCheck, CornerDownRight, Download, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
 import { Chip } from "@/components/ui/chip";
 import { Hint } from "@/components/ui/tooltip";
 import type { ContextMenuPosition } from "@/components/ContextMenu";
+import { inOrder, useChapterOrder } from "@/lib/chapterOrder";
 import { useT } from "@/lib/i18n";
 import { canFetchDirectly, type ChapterStatus } from "@/lib/library";
 import { cn } from "@/lib/utils";
@@ -103,10 +105,15 @@ export function ReadingModeChapters({
 }: ReadingModeChaptersProps) {
   const t = useT();
   const [filter, setFilter] = useState<Filter>("all");
+  const [order, toggleOrder] = useChapterOrder();
 
   const shown = useMemo(
-    () => (filter === "downloaded" ? chapters.filter((c) => c.folder !== null) : chapters),
-    [chapters, filter],
+    () =>
+      inOrder(
+        filter === "downloaded" ? chapters.filter((c) => c.folder !== null) : chapters,
+        order,
+      ),
+    [chapters, filter, order],
   );
 
   const list = useRef<HTMLDivElement | null>(null);
@@ -211,10 +218,22 @@ export function ReadingModeChapters({
               {t("seriesView.filterDownloaded")}
             </Chip>
           </div>
+          <ChapterOrderToggle order={order} onToggle={toggleOrder} />
           {resumeIndex >= 0 && (
-            <Button variant="ghost" size="sm" onClick={() => jumpTo(resumeIndex)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => jumpTo(resumeIndex)}
+              aria-label={t("seriesView.goToChapter", { number: shown[resumeIndex].number })}
+              title={t("seriesView.goToChapter", { number: shown[resumeIndex].number })}
+            >
               <CornerDownRight />
-              {t("seriesView.goToChapter", { number: shown[resumeIndex].number })}
+              {/* A phone's pinned row has the filters, the order and the
+                  download beside it; the label would push one onto a
+                  second line and make the pinned header twice as tall. */}
+              <span className="max-sm:hidden">
+                {t("seriesView.goToChapter", { number: shown[resumeIndex].number })}
+              </span>
             </Button>
           )}
           <div className="flex-1" />

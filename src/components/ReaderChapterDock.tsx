@@ -1,7 +1,9 @@
 import { BookOpen, ChevronsLeft, ChevronsRight, X } from "lucide-react";
 
+import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
 import { WheelPicker } from "@/components/ui/wheel-picker";
 import { usePresence } from "@/hooks/usePresence";
+import { inOrder, useChapterOrder } from "@/lib/chapterOrder";
 import { useT } from "@/lib/i18n";
 import { isMobile } from "@/lib/platform";
 import type { ReaderTarget } from "@/lib/reader";
@@ -53,6 +55,7 @@ export function ReaderChapterDock({
   className,
 }: ReaderChapterDockProps) {
   const t = useT();
+  const [order, toggleOrder] = useChapterOrder();
   const dock = usePresence(visible || pickerOpen, 160);
   const picker = usePresence(pickerOpen, 180);
 
@@ -62,9 +65,13 @@ export function ReaderChapterDock({
   // chapter after this one is further left, the way the pages already turn.
   const left = rtl ? next : previous;
   const right = rtl ? previous : next;
+  // Only the picker's rows follow the order. The arrows stay previous and
+  // next in the story — newest-first is how a list is drawn, not a reversal
+  // of which chapter comes after this one.
+  const listed = inOrder(chapters, order);
   const at = Math.max(
     0,
-    chapters.findIndex((c) => c.number === current),
+    listed.findIndex((c) => c.number === current),
   );
 
   return (
@@ -100,6 +107,7 @@ export function ReaderChapterDock({
                 <p className="text-sm font-medium">{t("readerView.chapters")}</p>
                 <div className="flex-1" />
                 <span className="font-mono text-xs text-on-ink-muted">{chapters.length}</span>
+                <ChapterOrderToggle tone="ink" order={order} onToggle={toggleOrder} />
                 <button
                   type="button"
                   aria-label={t("readerView.closeChapters")}
@@ -114,15 +122,15 @@ export function ReaderChapterDock({
               <WheelPicker
                 // Remounted per chapter, so it always opens on the one being
                 // read rather than wherever it was last left.
-                key={current}
+                key={`${current}-${order}`}
                 className="mx-3 mt-3"
-                labels={chapters.map((c) => t("readerView.chapterLabel", { number: c.number }))}
+                labels={listed.map((c) => t("readerView.chapterLabel", { number: c.number }))}
                 current={at}
                 ariaLabel={t("readerView.chapters")}
                 onCancel={() => onPickerOpenChange(false)}
                 onPick={(index) => {
                   onPickerOpenChange(false);
-                  const chosen = chapters[index];
+                  const chosen = listed[index];
                   if (chosen && chosen.number !== current) onNavigate(chosen.target);
                 }}
               />

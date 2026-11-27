@@ -58,6 +58,8 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ChapterOrderToggle } from "@/components/ui/chapter-order-toggle";
+import { inOrder, useChapterOrder } from "@/lib/chapterOrder";
 import { Hint } from "@/components/ui/tooltip";
 import { useThumbnail } from "@/hooks/useThumbnail";
 import { useT } from "@/lib/i18n";
@@ -620,9 +622,11 @@ export function SeriesView({
         direction: series.direction === "left-to-right" ? "left-to-right" : "right-to-left",
         language: series.language,
         // The whole series in reading order, so finishing one chapter moves to
-        // the next rather than stopping at whatever was opened.
-        chapters: (volumes ?? [])
-          .flatMap((v) => v.chapters)
+        // the next rather than stopping at whatever was opened. By chapter
+        // number, not shelf order: a volume layout can file a late chapter
+        // ahead of earlier unsorted ones, and "next" after chapter 4 was
+        // chapter 24 that way.
+        chapters: sourceOrder((volumes ?? []).flatMap((v) => v.chapters))
           .filter((c) => c.source_id && !c.unavailable)
           .map((c) => ({ id: c.source_id as string, number: c.number })),
         seriesSourceId: series.source_id,
@@ -1472,6 +1476,7 @@ function VolumePanel({
   const complete = isComplete(volume);
   const isUnsorted = volume.number === UNSORTED;
   const [options, setOptions] = useState<ContextMenuPosition | null>(null);
+  const [order, toggleOrder] = useChapterOrder();
   const { ref, url } = useThumbnail(volume.cover_path ?? "", 160);
   const numbers = volume.chapters.map((c) => c.number);
   const range =
@@ -1579,13 +1584,18 @@ function VolumePanel({
       ) : (
         <>
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-            <p className="type-overline px-5 pb-1 pt-4">{t("seriesView.chaptersOverline")}</p>
+            <div className="flex items-center gap-2 pb-1 pl-5 pr-3 pt-3">
+              <p className="type-overline flex-1">{t("seriesView.chaptersOverline")}</p>
+              {volume.chapters.length > 1 && (
+                <ChapterOrderToggle order={order} onToggle={toggleOrder} />
+              )}
+            </div>
             {volume.chapters.length === 0 ? (
               <p className="px-5 py-4 text-xs text-text-secondary">
                 {t("seriesView.noChaptersListed")}
               </p>
             ) : (
-              volume.chapters.map((chapter) => (
+              inOrder(volume.chapters, order).map((chapter) => (
                 <ChapterRow
                   key={chapter.number}
                   chapter={chapter}
