@@ -849,7 +849,10 @@ export function SeriesView({
                     ? sourceLabel(series.source, t)
                     : null
                 }
-                sourceOf={chapterSource}
+                // Only a chapter's own URL names where it came from: the id
+                // fallback in `chapterSource` assumes MangaDex, which is wrong
+                // for a series read through an extension.
+                sourceOf={(chapter) => (chapter.source_url ? chapterSource(chapter) : null)}
                 fetchingDirect={fetchingDirect}
                 onRead={openChapter}
                 onFetchDirect={(chapter) => void fetchDirect(chapter)}

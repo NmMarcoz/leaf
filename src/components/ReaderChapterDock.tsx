@@ -112,12 +112,12 @@ export function ReaderChapterDock({
               </div>
 
               <WheelPicker
-                // Remounted per opening, so it always starts on the chapter
-                // being read rather than wherever it was last left.
+                // Remounted per chapter, so it always opens on the one being
+                // read rather than wherever it was last left.
                 key={current}
                 className="mx-3 mt-3"
                 labels={chapters.map((c) => t("readerView.chapterLabel", { number: c.number }))}
-                initial={at}
+                current={at}
                 ariaLabel={t("readerView.chapters")}
                 onCancel={() => onPickerOpenChange(false)}
                 onPick={(index) => {

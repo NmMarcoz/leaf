@@ -4,8 +4,10 @@ import { cn } from "@/lib/utils";
 
 /** Height of one row, in CSS pixels (Figma "Chapter picker": 40). */
 const ROW = 40;
-/** Rows visible at once; the middle one is the selection. */
+/** Rows visible at once. */
 const VISIBLE = 5;
+/** Rows between the middle of the viewport and either edge. */
+const HALF = (VISIBLE - 1) / 2;
 /** How far round the drum one row sits. 20° puts the outer rows near edge-on,
  * which is what makes the wheel read as a cylinder rather than a list. */
 const STEP_DEG = 20;
@@ -33,9 +35,9 @@ function band(x: number): number {
   return (1 - 1 / ((x * 0.55) / STRETCH + 1)) * STRETCH;
 }
 
-function rubber(raw: number, last: number): number {
-  if (raw < 0) return -band(-raw);
-  if (raw > last) return last + band(raw - last);
+function rubber(raw: number, lo: number, hi: number): number {
+  if (raw < lo) return lo - band(lo - raw);
+  if (raw > hi) return hi + band(raw - hi);
   return raw;
 }
 
@@ -44,9 +46,9 @@ const clamp = (value: number, lo: number, hi: number) => Math.min(Math.max(value
 export interface WheelPickerProps {
   /** What each row says, in order. */
   labels: string[];
-  /** The row to start on. */
-  initial: number;
-  /** A row was chosen: clicked while centred, or Enter on the centred one. */
+  /** The row that is "here" — highlighted, and the one the list opens on. */
+  current: number;
+  /** A row was chosen: clicked, or Enter on the keyboard's row. */
   onPick: (index: number) => void;
   /** Escape. */
   onCancel?: () => void;
@@ -66,20 +68,34 @@ export interface WheelPickerProps {
  * Only the rows near the centre are rendered, so a series with a few hundred
  * chapters costs the same as one with ten.
  *
- * Choosing is two steps, as on iOS: a row is turned to the centre first, and
- * the centred row is the one a click opens. A click on any other row turns
- * the wheel to it, so a mis-tap never opens the wrong chapter.
+ * At rest the list sits flush against its ends, as an iOS list does: the
+ * first chapter fills the top row, not the middle one with blank rows above
+ * it. The blank only shows while the list is pulled past an end — that is
+ * the stretch — and the spring takes it away again on release.
+ *
+ * Any row opens with a click. A press that lands on a list still coasting
+ * only stops it, as on iOS, so catching a fling never opens what happened to
+ * be passing under the finger.
  */
 export function WheelPicker({
   labels,
-  initial,
+  current,
   onPick,
   onCancel,
   ariaLabel,
   className,
 }: WheelPickerProps) {
   const last = Math.max(0, labels.length - 1);
-  const [offset, setOffset] = useState(() => clamp(initial, 0, last));
+  // `offset` is the row under the middle of the viewport. It rests between
+  // `lo` and `hi`, which put the first row in the top slot and the last in
+  // the bottom one. A list shorter than the viewport just sits centred.
+  const lo = Math.min(HALF, last / 2);
+  const hi = Math.max(last - HALF, last / 2);
+  const [offset, setOffset] = useState(() => clamp(current, lo, hi));
+  /** The row the keyboard is on; starts on the current one. */
+  const [active, setActive] = useState(() => clamp(current, 0, last));
+  /** Whether the keyboard is driving, which is when the active row shows. */
+  const [keyboard, setKeyboard] = useState(false);
 
   // Physics lives in refs: it changes every frame and only `offset` paints.
   const pos = useRef(offset);
@@ -131,7 +147,7 @@ export function WheelPicker({
   /** Turn to a row, carrying whatever velocity the wheel already has. */
   const animateTo = useCallback(
     (index: number, kick = 0) => {
-      const goal = clamp(Math.round(index), 0, last);
+      const goal = clamp(Math.round(index), lo, hi);
       if (reducedMotion.current) {
         stop();
         vel.current = 0;
@@ -146,7 +162,7 @@ export function WheelPicker({
         frame.current = requestAnimationFrame(step);
       }
     },
-    [last, paint, step, stop],
+    [lo, hi, paint, step, stop],
   );
 
   /** Let go at `velocity` rows/second: coast, then land on the nearest row. */
@@ -159,8 +175,6 @@ export function WheelPicker({
   );
 
   useEffect(() => stop, [stop]);
-
-  const selected = clamp(Math.round(offset), 0, last);
 
   /* --------------------------------------------------------------- wheel */
 
@@ -185,14 +199,14 @@ export function WheelPicker({
         const from = target.current ?? Math.round(pos.current);
         const to = from + direction;
         // Past an end, the notch still lands — as a nudge that springs back.
-        animateTo(to, to < 0 || to > last ? direction * 6 : 0);
+        animateTo(to, to < lo || to > hi ? direction * 6 : 0);
         return;
       }
       stop();
       target.current = null;
       vel.current = 0;
       wheelRaw.current = (wheelRaw.current ?? pos.current) + event.deltaY / ROW;
-      paint(rubber(wheelRaw.current, last));
+      paint(rubber(wheelRaw.current, lo, hi));
       window.clearTimeout(wheelIdle.current);
       wheelIdle.current = window.setTimeout(() => {
         wheelRaw.current = null;
@@ -204,7 +218,7 @@ export function WheelPicker({
       node.removeEventListener("wheel", onWheel);
       window.clearTimeout(wheelIdle.current);
     };
-  }, [animateTo, last, paint, stop]);
+  }, [animateTo, lo, hi, paint, stop]);
 
   /* ---------------------------------------------------------------- drag */
 
@@ -215,15 +229,18 @@ export function WheelPicker({
     moved: boolean;
     samples: { t: number; raw: number }[];
   } | null>(null);
-  /** Set when the press that just ended was a drag, so its click is ignored. */
+  /** Set when the press that just ended was a drag, or caught the list
+   * coasting, so the click that follows it opens nothing. */
   const dragged = useRef(false);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    setKeyboard(false);
+    const coasting = frame.current !== 0 && Math.abs(vel.current) > 2;
     stop();
     target.current = null;
     vel.current = 0;
-    dragged.current = false;
+    dragged.current = coasting;
     drag.current = {
       id: event.pointerId,
       y: event.clientY,
@@ -247,17 +264,26 @@ export function WheelPicker({
     const raw = current.from - dy / ROW;
     current.samples.push({ t: event.timeStamp, raw });
     if (current.samples.length > 6) current.samples.shift();
-    paint(rubber(raw, last));
+    paint(rubber(raw, lo, hi));
   };
 
   const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
     drag.current = null;
     if (!current || current.id !== event.pointerId) return;
+    // The click a press produces arrives straight after this, in the same
+    // task; after that the flag must not linger. A drag captured on the list
+    // delivers no click to a row at all, and a stale flag would swallow the
+    // next real tap.
+    window.setTimeout(() => {
+      dragged.current = false;
+    }, 0);
     if (!current.moved) {
-      // A press that never moved: the row's own click decides. Settle only
-      // when the press caught the wheel between rows, mid-turn.
-      if (Math.abs(pos.current - Math.round(pos.current)) > 0.01) animateTo(pos.current);
+      // A press that never moved: the row's own click decides. Settle when
+      // the press caught the list between rows or out on its stretch.
+      if (Math.abs(pos.current - clamp(Math.round(pos.current), lo, hi)) > 0.01) {
+        animateTo(pos.current);
+      }
       return;
     }
     dragged.current = true;
@@ -272,29 +298,41 @@ export function WheelPicker({
   /* ------------------------------------------------------------ keyboard */
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const from = target.current ?? selected;
+    /** Move the keyboard's row, scrolling only as far as keeps it in view. */
+    const go = (to: number) => {
+      const next = clamp(to, 0, last);
+      setKeyboard(true);
+      setActive(next);
+      const base = target.current ?? pos.current;
+      if (to < 0 || to > last) {
+        // Already at an end: a nudge into the stretch, sprung back.
+        animateTo(base, Math.sign(to) * 6);
+      } else if (next < base - HALF + 0.5 || next > base + HALF - 0.5) {
+        animateTo(next < base ? next + HALF - 1 : next - HALF + 1);
+      }
+    };
     switch (event.key) {
       case "ArrowUp":
-        animateTo(from - 1, from - 1 < 0 ? -6 : 0);
+        go(active - 1);
         break;
       case "ArrowDown":
-        animateTo(from + 1, from + 1 > last ? 6 : 0);
+        go(active + 1);
         break;
       case "PageUp":
-        animateTo(from - VISIBLE);
+        go(Math.max(0, active - VISIBLE));
         break;
       case "PageDown":
-        animateTo(from + VISIBLE);
+        go(Math.min(last, active + VISIBLE));
         break;
       case "Home":
-        animateTo(0);
+        go(0);
         break;
       case "End":
-        animateTo(last);
+        go(last);
         break;
       case "Enter":
       case " ":
-        onPick(selected);
+        onPick(active);
         break;
       case "Escape":
         onCancel?.();
@@ -321,7 +359,7 @@ export function WheelPicker({
       role="listbox"
       tabIndex={0}
       aria-label={ariaLabel}
-      aria-activedescendant={`wheel-row-${selected}`}
+      aria-activedescendant={`wheel-row-${active}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -333,13 +371,6 @@ export function WheelPicker({
       )}
       style={{ height: ROW * VISIBLE, perspective: 1000 }}
     >
-      {/* The centred row's well, drawn behind the drum so the label turning
-          through it stays legible. */}
-      <div
-        aria-hidden
-        className="absolute inset-x-1 top-1/2 h-10 -translate-y-1/2 rounded-xl bg-ink-pressed"
-      />
-
       <div
         className="absolute inset-x-0 top-1/2"
         style={{ transformStyle: "preserve-3d", transform: `translateZ(${-RADIUS}px)` }}
@@ -354,22 +385,27 @@ export function WheelPicker({
               type="button"
               role="option"
               tabIndex={-1}
-              aria-selected={index === selected}
+              aria-selected={index === current}
               onClick={() => {
                 if (dragged.current) {
                   dragged.current = false;
                   return;
                 }
-                // Centred and at rest: open it. Anything else turns to it.
-                if (index === selected && Math.abs(pos.current - index) < 0.25) onPick(index);
-                else animateTo(index);
+                onPick(index);
               }}
-              className="absolute inset-x-0 flex h-10 items-center justify-center px-4 text-sm font-medium text-on-ink [backface-visibility:hidden]"
+              className={cn(
+                "absolute inset-x-1 flex h-10 items-center justify-center rounded-xl px-4 text-sm font-medium text-on-ink transition-colors [backface-visibility:hidden]",
+                // Figma "Current chapter selection": the well turns with
+                // its row rather than sitting fixed in the middle.
+                index === current ? "bg-ink-pressed" : "hover:bg-ink/60",
+                keyboard && index === active && "ring-1 ring-on-ink-muted",
+              )}
               style={{
                 top: -ROW / 2,
                 transform: `rotateX(${-angle}deg) translateZ(${RADIUS}px)`,
-                // Rows turning away also dim, as the light on a drum would.
-                opacity: Math.max(0, Math.cos((angle * Math.PI) / 180)) ** 1.5,
+                // Rows turning away dim, as the light on a drum would, but
+                // never so far that the row at an end becomes hard to read.
+                opacity: 0.4 + 0.6 * Math.cos((angle * Math.PI) / 180) ** 2,
               }}
             >
               <span className="truncate">{labels[index]}</span>
@@ -379,14 +415,17 @@ export function WheelPicker({
       </div>
 
       {/* Figma "Wheel top/bottom fade": the drum disappears into the panel
-          instead of being cut off at a hard edge. */}
+          where there is more list beyond the edge. At an end there is
+          nothing past it, so the fade goes and the end row reads plainly. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-ink-raised via-ink-raised/60 via-50% to-transparent"
+        style={{ opacity: clamp(offset - lo, 0, 1) }}
       />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-ink-raised via-ink-raised/60 via-50% to-transparent"
+        style={{ opacity: clamp(hi - offset, 0, 1) }}
       />
     </div>
   );
